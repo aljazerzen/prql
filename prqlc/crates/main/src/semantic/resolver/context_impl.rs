@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use prqlc_ast::expr::Ident;
 
-use crate::ir::pl::{Annotation, Expr, ExprKind, LineageColumn, TupleField, Ty};
+use crate::ir::pl::{Annotation, Expr, ExprKind, TupleField};
 use crate::semantic::context::{Decl, DeclKind, TableDecl, TableExpr};
 use crate::semantic::{Context, Module, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_THAT, NS_THIS};
 use crate::Error;
@@ -35,20 +35,11 @@ impl Context {
     }
 
     pub(super) fn prepare_expr_decl(&mut self, value: Box<Expr>) -> DeclKind {
-        match &value.lineage {
-            Some(frame) => {
-                let columns = (frame.columns.iter())
-                    .map(|col| match col {
-                        LineageColumn::All { .. } => TupleField::Wildcard(None),
-                        LineageColumn::Single { name, .. } => {
-                            TupleField::Single(name.as_ref().map(|n| n.name.clone()), None)
-                        }
-                    })
-                    .collect();
-                let ty = Some(Ty::relation(columns));
-
+        match &value.ty {
+            Some(ty) if ty.is_relation() => {
+                let ty = Some(ty.clone());
                 let expr = TableExpr::RelationVar(value);
-                DeclKind::TableDecl(TableDecl { ty, expr })
+                DeclKind::TableDecl(TableDecl { expr, ty })
             }
             _ => DeclKind::Expr(value),
         }
@@ -275,22 +266,24 @@ impl Context {
 
         // also add into input tables of this table expression
         if let TableExpr::RelationVar(expr) = &table_decl.expr {
-            if let Some(frame) = &expr.lineage {
-                let wildcard_inputs = (frame.columns.iter())
-                    .filter_map(|c| c.as_all())
-                    .collect_vec();
+            if let Some(ty) = &expr.ty {
+                if let Some(fields) = ty.as_relation() {
+                    let wildcard_inputs = (fields.iter())
+                        .filter_map(|c| c.as_wildcard())
+                        .collect_vec();
 
-                match wildcard_inputs.len() {
-                    0 => return Err(format!("Cannot infer where {table_ident}.{col_name} is from")),
-                    1 => {
-                        let (input_name, _) = wildcard_inputs.into_iter().next().unwrap();
+                    match wildcard_inputs.len() {
+                        0 => return Err(format!("Cannot infer where {table_ident}.{col_name} is from")),
+                        1 => {
+                            let wildcard_ty = wildcard_inputs.into_iter().next().unwrap();
+                            let wildcard_ty = wildcard_ty.as_ref().unwrap();
+                            let table_fq = wildcard_ty.instance_of.clone().unwrap();
 
-                        let input = frame.find_input(input_name).unwrap();
-                        let table_ident = input.table.clone();
-                        self.infer_table_column(&table_ident, col_name)?;
-                    }
-                    _ => {
-                        return Err(format!("Cannot infer where {table_ident}.{col_name} is from. It could be any of {wildcard_inputs:?}"))
+                            self.infer_table_column(&table_fq, col_name)?;
+                        }
+                        _ => {
+                            return Err(format!("Cannot infer where {table_ident}.{col_name} is from. It could be any of {wildcard_inputs:?}"))
+                        }
                     }
                 }
             }
