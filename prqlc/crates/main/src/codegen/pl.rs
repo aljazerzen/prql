@@ -81,7 +81,7 @@ impl WriteSource for TyKind {
 impl WriteSource for TupleField {
     fn write(&self, opt: WriteOpt) -> Option<String> {
         match self {
-            Self::Wildcard(generic_el) => match generic_el {
+            Self::All { ty: generic_el, .. } => match generic_el {
                 Some(el) => Some(format!("{}..", el.write(opt)?)),
                 None => Some("*..".to_string()),
             },

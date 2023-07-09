@@ -372,7 +372,7 @@ fn restrict_ty(value: pl::Ty) -> prqlc_ast::expr::Expr {
                         }
                         e
                     }
-                    pl::TupleField::Wildcard(_) => {
+                    pl::TupleField::All { .. } => {
                         // TODO: this is not correct
                         Expr::new(ExprKind::Ident(Ident::from_name("*")))
                     }

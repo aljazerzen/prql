@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 use itertools::Itertools;
 
@@ -40,7 +42,10 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
                         None => None,
                     };
 
-                    set_elements.push(TupleField::Wildcard(inner))
+                    set_elements.push(TupleField::All {
+                        ty: inner,
+                        except: HashSet::new(),
+                    })
                 } else {
                     elements.push(only);
                 }
@@ -299,7 +304,10 @@ impl Resolver {
                         return Ok(false);
                     }
                 },
-                TupleField::Wildcard(expected_wildcard) => {
+                TupleField::All {
+                    ty: expected_wildcard,
+                    ..
+                } => {
                     for found_field in found {
                         self.validate_type(found_field, expected_wildcard.as_ref(), who)?;
                     }
