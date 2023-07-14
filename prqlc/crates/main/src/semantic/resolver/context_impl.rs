@@ -206,7 +206,10 @@ impl Context {
         // This is just a workaround to return an Ident from this function.
         // We wrap the expr into DeclKind::Expr and save it into context.
         let cols_expr = Expr {
-            ty: Some(Ty::from(TyKind::Tuple(fields))),
+            ty: Some(Ty {
+                instance_of: Some(instance_of.clone()),
+                ..Ty::from(TyKind::Tuple(fields))
+            }),
             ..Expr::new(ExprKind::TupleFields(vec![]))
         };
         let cols_expr = DeclKind::Expr(Box::new(cols_expr));

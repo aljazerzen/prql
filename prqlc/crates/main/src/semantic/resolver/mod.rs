@@ -274,12 +274,10 @@ impl PlFold for Resolver {
                 match &entry.kind {
                     DeclKind::Infer(_) => Expr {
                         kind: ExprKind::Ident(fq_ident),
-                        target_id: entry.declared_at,
                         ..node
                     },
                     DeclKind::Column(ty) => Expr {
                         kind: ExprKind::Ident(fq_ident),
-                        target_id: Some(ty.lineage.unwrap()),
                         ty: Some(ty.clone()),
                         ..node
                     },
@@ -1005,8 +1003,10 @@ pub(super) mod test {
         let exprs = derive
             .kind
             .into_derive()
+            .unwrap_or_else(|e| panic!("Failed to convert `{e:?}`"))
+            .kind
+            .into_tuple()
             .unwrap_or_else(|e| panic!("Failed to convert `{e:?}`"));
-
         let exprs = IdEraser {}.fold_exprs(exprs).unwrap();
         Ok(exprs)
     }
