@@ -569,7 +569,7 @@ impl Lowerer {
 
                     columns.push((RelationColumn::Single(name.clone()), cid));
                 }
-                TupleField::All { except, .. } => {
+                TupleField::All { exclude, .. } => {
                     let input_id = tuple.lineage.unwrap();
 
                     match &self.node_mapping[&input_id] {
@@ -578,7 +578,9 @@ impl Lowerer {
                             let mut input_cols = input_cols
                                 .iter()
                                 .filter(|(c, _)| match c {
-                                    RelationColumn::Single(Some(name)) => !except.contains(name),
+                                    RelationColumn::Single(Some(name)) => {
+                                        !exclude.contains(&Ident::from_name(name))
+                                    }
                                     _ => true,
                                 })
                                 .collect_vec();
@@ -616,7 +618,8 @@ impl Lowerer {
 
             // special case: ExprKind::All
             let mut selected = Vec::<CId>::new();
-            for target_id in expr.target_ids {
+            for target_id in vec![expr.target_id.unwrap()] {
+                // TODO: target_ids
                 match &self.node_mapping[&target_id] {
                     LoweredTarget::Compute(cid) => {
                         selected.push(*cid);
@@ -725,7 +728,8 @@ impl Lowerer {
             pl::ExprKind::All { except, .. } => {
                 let mut targets = Vec::new();
 
-                for target_id in &expr.target_ids {
+                for target_id in &vec![expr.target_id.unwrap()] {
+                    // TODO: target_ids
                     match self.node_mapping.get(target_id) {
                         Some(LoweredTarget::Compute(cid)) => targets.push(*cid),
                         Some(LoweredTarget::Input(input_columns)) => {
@@ -796,6 +800,8 @@ impl Lowerer {
             pl::ExprKind::FuncCall(_)
             | pl::ExprKind::Range(_)
             | pl::ExprKind::Tuple(_)
+            | pl::ExprKind::TupleFields(_)
+            | pl::ExprKind::TupleExclude { .. }
             | pl::ExprKind::Array(_)
             | pl::ExprKind::Func(_)
             | pl::ExprKind::Type(_)

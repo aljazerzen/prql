@@ -76,11 +76,9 @@ pub fn expand_expr(expr: Expr) -> Result<pl::Expr> {
         alias: expr.alias,
         id: None,
         target_id: None,
-        target_ids: Vec::new(),
         ty: None,
         lineage: None,
         needs_window: false,
-        flatten: false,
     })
 }
 
@@ -271,8 +269,10 @@ fn restrict_expr_kind(value: pl::ExprKind) -> ExprKind {
     match value {
         pl::ExprKind::Ident(v) => ExprKind::Ident(v),
         pl::ExprKind::Literal(v) => ExprKind::Literal(v),
-        pl::ExprKind::Tuple(v) => ExprKind::Tuple(restrict_exprs(v)),
         pl::ExprKind::Array(v) => ExprKind::Array(restrict_exprs(v)),
+        pl::ExprKind::Tuple(v) => ExprKind::Tuple(restrict_exprs(v)),
+        pl::ExprKind::TupleFields(v) => ExprKind::Tuple(restrict_exprs(v)),
+        pl::ExprKind::TupleExclude { expr, .. } => ExprKind::Tuple(vec![restrict_expr(*expr)]),
         pl::ExprKind::Range(v) => ExprKind::Range(v.map(restrict_expr_box)),
         pl::ExprKind::FuncCall(v) => ExprKind::FuncCall(prqlc_ast::expr::FuncCall {
             name: restrict_expr_box(v.name),

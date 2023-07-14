@@ -8,14 +8,12 @@ use crate::ir::pl::*;
 use crate::semantic::context::TableDecl;
 use crate::semantic::{static_analysis, NS_PARAM};
 use crate::utils::IdGenerator;
-use crate::{Error, Reason, Span, WithErrorInfo};
+use crate::{Error, Span, WithErrorInfo};
 
 use super::context::{Context, Decl, DeclKind, TableExpr};
 use super::module::Module;
-use super::{write_pl, NS_DEFAULT_DB, NS_INFER, NS_STD, NS_THAT, NS_THIS};
+use super::{NS_DEFAULT_DB, NS_INFER, NS_STD, NS_THAT, NS_THIS};
 use flatten::Flattener;
-use transforms::coerce_into_tuple_and_flatten;
-use type_resolver::infer_type;
 
 mod context_impl;
 mod flatten;
@@ -121,7 +119,7 @@ impl Resolver {
                         declared_at: stmt.id,
                         kind: DeclKind::Module(Module {
                             names: HashMap::new(),
-                            redirects: Vec::new(),
+                            redirects: [].into(),
                             shadowed: None,
                         }),
                         ..Default::default()
@@ -179,7 +177,7 @@ impl Resolver {
         let fields = fields.unwrap_or_else(|| {
             vec![TupleField::All {
                 ty: None,
-                except: HashSet::new(),
+                exclude: HashSet::new(),
             }]
         });
 
@@ -279,9 +277,10 @@ impl PlFold for Resolver {
                         target_id: entry.declared_at,
                         ..node
                     },
-                    DeclKind::Column(target_id) => Expr {
+                    DeclKind::Column(ty) => Expr {
                         kind: ExprKind::Ident(fq_ident),
-                        target_id: Some(*target_id),
+                        target_id: Some(ty.lineage.unwrap()),
+                        ty: Some(ty.clone()),
                         ..node
                     },
 
@@ -332,8 +331,13 @@ impl PlFold for Resolver {
                 if (name.kind.as_ident()).map_or(false, |i| i.to_string() == "std.not")
                     && matches!(args[0].kind, ExprKind::Tuple(_)) =>
             {
-                let arg = args.into_iter().exactly_one().unwrap();
-                self.resolve_column_exclusion(arg)?
+                let mut this = Expr::new(ExprKind::Ident(Ident::from_path(vec![NS_THIS, "*"])));
+                this.span = span;
+                let this = self.fold_expr(this)?;
+
+                let exclude_tuple = args.into_iter().exactly_one().unwrap();
+
+                create_tuple_exclude(this, exclude_tuple, span)?
             }
 
             ExprKind::FuncCall(FuncCall {
@@ -357,45 +361,20 @@ impl PlFold for Resolver {
 
             ExprKind::Func(closure) => self.fold_function(*closure, span)?,
 
-            ExprKind::All { within, except } => {
-                let decl = self.context.root_mod.get(&within);
-
-                // lookup ids of matched inputs
-                let target_ids = decl
-                    .and_then(|d| d.kind.as_module())
-                    .iter()
-                    .flat_map(|module| module.as_decls())
-                    .sorted_by_key(|(_, decl)| decl.order)
-                    .flat_map(|(_, decl)| match &decl.kind {
-                        DeclKind::Column(target_id) => Some(*target_id),
-                        DeclKind::Infer(_) => decl.declared_at,
-                        _ => None,
-                    })
-                    .unique()
-                    .collect();
-
-                let kind = ExprKind::All { within, except };
-                Expr {
-                    kind,
-                    target_ids,
-                    ..node
-                }
-            }
-
             ExprKind::Tuple(exprs) => {
                 let exprs = self.fold_exprs(exprs)?;
 
                 // flatten
-                let exprs = exprs
-                    .into_iter()
-                    .flat_map(|e| match e.kind {
-                        ExprKind::Tuple(items) if e.flatten => items,
-                        _ => vec![e],
-                    })
-                    .collect_vec();
+                let mut flattened = Vec::with_capacity(exprs.len());
+                for expr in exprs {
+                    match expr.kind {
+                        ExprKind::TupleFields(fields) => flattened.extend(fields),
+                        _ => flattened.push(expr),
+                    }
+                }
 
                 Expr {
-                    kind: ExprKind::Tuple(exprs),
+                    kind: ExprKind::Tuple(flattened),
                     ..node
                 }
             }
@@ -432,21 +411,7 @@ impl PlFold for Resolver {
         r.span = r.span.or(span);
 
         if r.ty.is_none() {
-            r.ty = infer_type(&r)?;
-        }
-        if r.ty.is_none() {
-            if let ExprKind::TransformCall(call) = &r.kind {
-                r.ty = Some(call.infer_type(&self.context)?);
-            } else if let Some(relation_columns) = r.ty.as_ref().and_then(|t| t.as_relation()) {
-                // lineage from ty
-
-                let columns = Some(relation_columns.clone());
-
-                let name = r.alias.clone();
-                let ty = self.declare_table_for_literal(id, columns, name);
-
-                r.ty = Some(ty);
-            }
+            r.ty = self.infer_type(&r)?;
         }
         if let Some(ty) = &mut r.ty {
             if let Some(alias) = r.alias.clone() {
@@ -455,6 +420,28 @@ impl PlFold for Resolver {
         }
         Ok(r)
     }
+}
+
+pub(super) fn create_tuple_exclude(
+    expr: Expr,
+    exclude_tuple: Expr,
+    span: Option<Span>,
+) -> Result<Expr> {
+    let exclude = exclude_tuple.ty.unwrap().kind.into_tuple().unwrap();
+    let exclude = exclude
+        .into_iter()
+        .filter_map(|x| match x {
+            TupleField::Single(Some(name), _) => Some(Ident::from_name(name)),
+            _ => None,
+        })
+        .collect();
+
+    let expr = Box::new(expr);
+
+    Ok(Expr {
+        span,
+        ..Expr::new(ExprKind::TupleExclude { expr, exclude })
+    })
 }
 
 impl Resolver {
@@ -721,10 +708,10 @@ impl Resolver {
 
                         // add aliased columns into scope
                         if let Some(alias) = field.alias.clone() {
-                            let id = field.id.unwrap();
+                            let ty = field.ty.clone().unwrap();
                             self.context
                                 .root_mod
-                                .insert_relation_col(NS_THIS, alias, id);
+                                .insert_relation_col(NS_THIS, alias, ty);
                         }
                         fields_new.push(field);
                     }
@@ -810,27 +797,6 @@ impl Resolver {
         let res = self.fold_expr(expr);
         self.default_namespace = prev_namespace;
         res
-    }
-
-    fn resolve_column_exclusion(&mut self, expr: Expr) -> Result<Expr> {
-        let expr = self.fold_expr(expr)?;
-        let tuple = coerce_into_tuple_and_flatten(expr)?;
-        let except: Vec<Expr> = tuple
-            .into_iter()
-            .map(|e| match e.kind {
-                ExprKind::Ident(_) | ExprKind::All { .. } => Ok(e),
-                _ => Err(Error::new(Reason::Expected {
-                    who: Some("exclusion".to_string()),
-                    expected: "column name".to_string(),
-                    found: format!("`{}`", write_pl(e)),
-                })),
-            })
-            .try_collect()?;
-
-        self.fold_expr(Expr::new(ExprKind::All {
-            within: Ident::from_name(NS_THIS),
-            except,
-        }))
     }
 
     pub fn fold_type_expr(&mut self, expr: Option<Box<Expr>>) -> Result<Option<Ty>> {
@@ -1019,7 +985,6 @@ pub(super) mod test {
             expr.kind = self.fold_expr_kind(expr.kind)?;
             expr.id = None;
             expr.target_id = None;
-            expr.target_ids.clear();
             Ok(expr)
         }
     }
@@ -1162,5 +1127,159 @@ pub(super) mod test {
             "#
         )
         .unwrap());
+    }
+
+    #[test]
+    fn test_tuple_field_name_inference() {
+        // test that:
+        // - type contains aliases,
+        // - names are not duplicated, but overridden,
+        // - when using plain ident without alias, the ident is used as alias (TODO)
+        assert_yaml_snapshot!(resolve_ty(
+            r#"
+            [{a = 1, b = 2, a = 3}]
+            "#
+        )
+        .unwrap(), @r###"
+        ---
+        kind:
+          Array:
+            kind:
+              Tuple:
+                - Single:
+                    - ~
+                    - kind:
+                        Primitive: Int
+                - Single:
+                    - b
+                    - kind:
+                        Primitive: Int
+                - Single:
+                    - a
+                    - kind:
+                        Primitive: Int
+        "###);
+    }
+
+    #[test]
+    fn test_tuple_field_exclude() {
+        assert_yaml_snapshot!(resolve_ty(
+            r#"
+            from tracks
+            select (std.tuple_exclude {track_id, milliseconds, title, price} {milliseconds, title})
+            "#
+        )
+        .unwrap(), @r###"
+        ---
+        kind:
+          Array:
+            kind:
+              Tuple:
+                - Single:
+                    - ~
+                    - kind:
+                        Tuple:
+                          - Single:
+                              - track_id
+                              - kind:
+                                  Union:
+                                    - - int
+                                      - kind:
+                                          Primitive: Int
+                                        name: int
+                                    - - float
+                                      - kind:
+                                          Primitive: Float
+                                        name: float
+                                    - - bool
+                                      - kind:
+                                          Primitive: Bool
+                                        name: bool
+                                    - - text
+                                      - kind:
+                                          Primitive: Text
+                                        name: text
+                                    - - date
+                                      - kind:
+                                          Primitive: Date
+                                        name: date
+                                    - - time
+                                      - kind:
+                                          Primitive: Time
+                                        name: time
+                                    - - timestamp
+                                      - kind:
+                                          Primitive: Timestamp
+                                        name: timestamp
+                                    - - ~
+                                      - kind:
+                                          Singleton: "Null"
+                                name: scalar
+                                lineage: 181
+                          - Single:
+                              - price
+                              - kind:
+                                  Union:
+                                    - - int
+                                      - kind:
+                                          Primitive: Int
+                                        name: int
+                                    - - float
+                                      - kind:
+                                          Primitive: Float
+                                        name: float
+                                    - - bool
+                                      - kind:
+                                          Primitive: Bool
+                                        name: bool
+                                    - - text
+                                      - kind:
+                                          Primitive: Text
+                                        name: text
+                                    - - date
+                                      - kind:
+                                          Primitive: Date
+                                        name: date
+                                    - - time
+                                      - kind:
+                                          Primitive: Time
+                                        name: time
+                                    - - timestamp
+                                      - kind:
+                                          Primitive: Timestamp
+                                        name: timestamp
+                                    - - ~
+                                      - kind:
+                                          Singleton: "Null"
+                                name: scalar
+                                lineage: 181
+                      lineage: 212
+        "###);
+
+        assert_yaml_snapshot!(resolve_ty(
+            r#"
+            from tracks
+            select !{title, composer}
+            "#
+        )
+        .unwrap(), @r###"
+        ---
+        kind:
+          Array:
+            kind:
+              Tuple:
+                - Single:
+                    - ~
+                    - kind:
+                        Primitive: Int
+                - Single:
+                    - b
+                    - kind:
+                        Primitive: Int
+                - Single:
+                    - a
+                    - kind:
+                        Primitive: Int
+        "###);
     }
 }

@@ -69,19 +69,19 @@ impl WriteSource for ExprKind {
             }
             .write_between("(", ")", opt),
 
-            Tuple(fields) => SeparatedExprs {
-                exprs: fields,
-                inline: ", ",
-                line_end: ",",
-            }
-            .write_between("{", "}", opt),
-
             Array(items) => SeparatedExprs {
                 exprs: items,
                 inline: ", ",
                 line_end: ",",
             }
             .write_between("[", "]", opt),
+
+            Tuple(fields) => SeparatedExprs {
+                exprs: fields,
+                inline: ", ",
+                line_end: ",",
+            }
+            .write_between("{", "}", opt),
 
             Range(range) => {
                 let mut r = String::new();
