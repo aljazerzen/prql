@@ -1,5 +1,5 @@
 use std::collections::hash_map::RandomState;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::iter::zip;
 
 use anyhow::Result;
@@ -610,7 +610,7 @@ impl Lowerer {
     ) -> Result<Vec<CId>> {
         let mut r = Vec::with_capacity(exprs.len());
         for expr in exprs {
-            let pl::ExprKind::All { except, .. } = expr.kind else {
+            let pl::ExprKind::TupleExclude { .. } = expr.kind else {
                 // base case
                 r.push(self.declare_as_column(expr, is_aggregation)?);
                 continue;
@@ -632,17 +632,18 @@ impl Lowerer {
                 }
             }
 
-            let except: HashSet<CId> = except
-                .into_iter()
-                .filter(|e| e.target_id.is_some())
-                .map(|e| {
-                    let id = e.target_id.unwrap();
-                    self.lookup_cid(id, Some(&e.kind.into_ident().unwrap().name))
-                })
-                .try_collect()?;
-            selected.retain(|c| !except.contains(c));
+            todo!();
+            // let exclude: HashSet<CId> = exclude
+            // .into_iter()
+            // .filter(|e| e.target_id.is_some())
+            // .map(|e| {
+            //     let id = e.target_id.unwrap();
+            //     self.lookup_cid(id, Some(&e.kind.into_ident().unwrap().name))
+            // })
+            // .try_collect()?;
+            // selected.retain(|c| !exclude.contains(c));
 
-            r.extend(selected);
+            // r.extend(selected);
         }
         Ok(r)
     }
@@ -725,41 +726,42 @@ impl Lowerer {
                     rq::ExprKind::SString(vec![InterpolateItem::String(ident.name)])
                 }
             }
-            pl::ExprKind::All { except, .. } => {
-                let mut targets = Vec::new();
+            pl::ExprKind::TupleExclude { .. } => {
+                todo!();
+                // let mut targets = Vec::new();
 
-                for target_id in &vec![expr.target_id.unwrap()] {
-                    // TODO: target_ids
-                    match self.node_mapping.get(target_id) {
-                        Some(LoweredTarget::Compute(cid)) => targets.push(*cid),
-                        Some(LoweredTarget::Input(input_columns)) => {
-                            targets.extend(input_columns.values().map(|(c, _)| c))
-                        }
-                        _ => {}
-                    }
-                }
+                // for target_id in &vec![expr.target_id.unwrap()] {
+                //     // TODO: target_ids
+                //     match self.node_mapping.get(target_id) {
+                //         Some(LoweredTarget::Compute(cid)) => targets.push(*cid),
+                //         Some(LoweredTarget::Input(input_columns)) => {
+                //             targets.extend(input_columns.values().map(|(c, _)| c))
+                //         }
+                //         _ => {}
+                //     }
+                // }
 
-                // this is terrible code
-                let except: HashSet<_> = except
-                    .iter()
-                    .map(|e| {
-                        let ident = e.kind.as_ident().unwrap();
-                        self.lookup_cid(e.target_id.unwrap(), Some(&ident.name))
-                            .unwrap()
-                    })
-                    .collect();
+                // // this is terrible code
+                // let except: HashSet<_> = except
+                //     .iter()
+                //     .map(|e| {
+                //         let ident = e.kind.as_ident().unwrap();
+                //         self.lookup_cid(e.target_id.unwrap(), Some(&ident.name))
+                //             .unwrap()
+                //     })
+                //     .collect();
 
-                targets.retain(|t| !except.contains(t));
+                // targets.retain(|t| !except.contains(t));
 
-                if targets.len() == 1 {
-                    rq::ExprKind::ColumnRef(targets[0])
-                } else {
-                    return Err(
-                        Error::new_simple("This wildcard usage is not yet supported.")
-                            .with_span(expr.span)
-                            .into(),
-                    );
-                }
+                // if targets.len() == 1 {
+                //     rq::ExprKind::ColumnRef(targets[0])
+                // } else {
+                //     return Err(
+                //         Error::new_simple("This wildcard usage is not yet supported.")
+                //             .with_span(expr.span)
+                //             .into(),
+                //     );
+                // }
             }
             pl::ExprKind::Literal(literal) => rq::ExprKind::Literal(literal),
 
@@ -801,7 +803,6 @@ impl Lowerer {
             | pl::ExprKind::Range(_)
             | pl::ExprKind::Tuple(_)
             | pl::ExprKind::TupleFields(_)
-            | pl::ExprKind::TupleExclude { .. }
             | pl::ExprKind::Array(_)
             | pl::ExprKind::Func(_)
             | pl::ExprKind::Type(_)

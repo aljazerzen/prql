@@ -53,11 +53,6 @@ pub struct Expr {
 #[derive(Debug, EnumAsInner, PartialEq, Clone, Serialize, Deserialize, strum::AsRefStr)]
 pub enum ExprKind {
     Ident(Ident),
-    #[deprecated]
-    All {
-        within: Ident,
-        except: Vec<Expr>,
-    },
     Literal(Literal),
 
     /// Container type with a static number of fields.

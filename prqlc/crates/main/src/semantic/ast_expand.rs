@@ -310,7 +310,6 @@ fn restrict_expr_kind(value: pl::ExprKind) -> ExprKind {
         pl::ExprKind::Internal(v) => ExprKind::Internal(v),
 
         // TODO: these are not correct, they are producing invalid PRQL
-        pl::ExprKind::All { within, .. } => ExprKind::Ident(within),
         pl::ExprKind::Type(ty) => ExprKind::Ident(Ident::from_name(format!("<{}>", ty))),
         pl::ExprKind::TransformCall(tc) => ExprKind::Ident(Ident::from_name(format!(
             "({} ...)",
