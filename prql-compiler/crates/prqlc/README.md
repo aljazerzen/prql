@@ -88,7 +88,7 @@ cargo install prqlc
 
 ```sh
 # From a local PRQL repository
-cargo install --path crates/prqlc
+cargo install --path prql-compiler/crates/prqlc
 ```
 
 ### Shell completions

@@ -1,13 +1,18 @@
 [workspace]
 members = [
-  "crates/*",
-  "bindings/prql-elixir/native/prql",
-  "bindings/prql-java",
-  "bindings/prql-js",
-  "bindings/prql-lib",
-  "bindings/prql-python",
+  "prql-compiler/crates/prql-ast",
+  "prql-compiler/crates/prql-compiler",
+  "prql-compiler/crates/prql-compiler-macros",
+  "prql-compiler/crates/prql-parser",
+  "prql-compiler/crates/prqlc",
+  "prql-compiler/crates/tests_misc",
+  "prql-compiler/crates/prql-compiler/examples/compile-files", # An example
+  "prql-compiler/bindings/prql-elixir/native/prql",
+  "prql-compiler/bindings/prql-java",
+  "prql-compiler/bindings/prql-js",
+  "prql-compiler/bindings/prql-lib",
+  "prql-compiler/bindings/prql-python",
   "web/book", # The book / docs
-  "crates/prql-compiler/examples/compile-files", # An example
 ]
 resolver = "2"
 
