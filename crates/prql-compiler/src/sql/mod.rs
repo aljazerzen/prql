@@ -21,15 +21,27 @@ use self::srq::context::AnchorContext;
 /// Translate a PRQL AST into a SQL string.
 pub fn compile(query: Query, options: &Options) -> Result<String> {
     let crate::Target::Sql(dialect) = options.target;
-    let sql_ast = gen_query::translate_query(query, dialect)?;
+    
+    let (query, params) = if options.format {
+        formatting::extract_params(query)
+    } else {
+        (query, vec![])
+    };
 
+    // compile from RQ to SRQ
+    let (srq_query, mut ctx) = srq::compile_query(query, dialect)?;
+
+    // compile from SRQ to SQL
+    let sql_ast = gen_query::translate_query(srq_query, &mut ctx)?;
+
+    // codegen with sql-parser's Display impl
     let sql = sql_ast.to_string();
 
     // formatting
     let sql = if options.format {
         let formatted = sqlformat::format(
             &sql,
-            &sqlformat::QueryParams::default(),
+            &sqlformat::QueryParams::Indexed(params),
             sqlformat::FormatOptions::default(),
         );
 
@@ -57,6 +69,47 @@ pub fn compile(query: Query, options: &Options) -> Result<String> {
     Ok(sql)
 }
 
+mod formatting {
+    use anyhow::Result;
+
+    use crate::ir::rq::{fold_expr_kind, ExprKind, Query, RqFold};
+
+    pub fn extract_params(query: Query) -> (Query, Vec<String>) {
+        let mut p = ParamExtractor { param_contents: Vec::new() };
+        let query = p.fold_query(query).unwrap();
+        (query, p.param_contents)
+    }
+
+    /// Extracts params (and potentially s-strings)
+    /// so they can be substituted back in after formatting.
+    struct ParamExtractor {
+        param_contents: Vec<String>,
+    }
+
+    impl ParamExtractor {
+        /// Takes a param content - an arbitrary string that we want to prevent from being formatted.
+        /// Returns a positional SQL param (i.e. $3), which will later be substituted for the content.
+        fn push_param(&mut self, param_content: String) -> String {
+            self.param_contents.push(param_content);
+
+            self.param_contents.len().to_string()
+        }
+    }
+
+    // SRQ IR tree pass that extracts the param
+    impl RqFold for ParamExtractor {
+        fn fold_expr_kind(&mut self, kind: ExprKind) -> Result<ExprKind> {
+            match kind {
+                ExprKind::Param(name) => {
+                    let new_id = self.push_param(format!("${name}"));
+
+                    Ok(ExprKind::Param(new_id))
+                }
+                _ => fold_expr_kind(self, kind),
+            }
+        }
+    }
+}
 /// This module gives access to internal machinery that gives no stability guarantees.
 pub mod internal {
     use super::*;
