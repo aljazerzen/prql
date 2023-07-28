@@ -142,7 +142,7 @@ jobs:
         # https://github.com/foresterre/cargo-msrv/issues/590
       - name: Verify minimum rust version — prql-compiler
         # Ideally we'd check all crates, ref https://github.com/foresterre/cargo-msrv/issues/295
-        working-directory: prql-compiler/crates/prql-compiler
+        working-directory: prql-compiler/crates/main
         run: cargo msrv verify
       - name: Verify minimum rust version — prqlc
         working-directory: prql-compiler/crates/prqlc

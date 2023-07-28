@@ -18,7 +18,7 @@
     "@testing-library/react": "^14.0.0",
     "@testing-library/user-event": "^14.4.3",
     "monaco-editor": "^0.40.0",
-    "prql-js": "file:../../bindings/prql-js",
+    "prql-js": "file:../../prqlc/bindings/js",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-syntax-highlighter": "^15.5.0",
@@ -40,7 +40,7 @@
   "private": true,
   "scripts": {
     "build": "react-scripts build",
-    "prepare": "rsync -ai --checksum --delete ../../prql-compiler/crates/prql-compiler/tests/integration/data/ public/data/ && node generateBook.js",
+    "prepare": "rsync -ai --checksum --delete ../../prqlc/crates/main/tests/integration/data/ public/data/ && node generateBook.js",
     "start": "react-scripts start",
     "test": "react-scripts test"
   },

@@ -133,7 +133,7 @@ To stay in touch with PRQL:
 
 This repo is composed of:
 
-- **[prql-compiler](./prql-compiler/)** — the compiler, written in rust.
+- **[prqlc](./prqlc/)** — the compiler, written in rust.
 - **[web](./web/)** — our web content: the [Book][prql book],
   [Website][prql website], and [Playground][prql playground].
 

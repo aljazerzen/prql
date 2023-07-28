@@ -6,10 +6,8 @@ target*/
 
 lcov.info
 
-**/.vscode/settings.json
-**/.vscode/launch.json
-**/.vscode/tasks.json
-.idea
+**/.vscode/
+**/.idea
 
 _*.prql
 /*.prql

@@ -14,7 +14,7 @@ Supported bindings require:
 
 - A maintainer.
 - Implementations of the
-  [core compile functions](https://docs.rs/prql-compiler/latest/prql_compiler/#functions).
+  [core compile functions](https://docs.rs/prqlc/latest/prql_compiler/#functions).
 - Test coverage for these functions.
 - A published package to the language's standard package repository.
 - A script in `Taskfile.yml` to bootstrap a development environment.
