@@ -1,105 +1,15 @@
 # yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
-
-# This file gives new contributors an easy way to get everything they need,
-# assuming `cargo` and [Task](https://taskfile.dev) are installed.
-
-# Beyond installing requirements, we generally shouldn't be using this as a
-# Makefile — in other words, we shouldn't require running this as part of normal
-# development. Rust tools are independently good, and adding an intermediate
-# layer means we're reimplementing things or getting in the way. Instead, this
-# can be used to aggregate commands that are currently separate; e.g. check out
-# `test-all`.
-
-# Some of the file may be somewhat over-engineered!
-
 version: "3"
 
 vars:
-  # Keep in sync with .vscode/extensions.json
   vscode_extensions: |
     budparr.language-hugo-vscode
     esbenp.prettier-vscode
     mitsuhiko.insta
     prql-lang.prql-vscode
     rust-lang.rust-analyzer
-  cargo_crates:
-    bacon cargo-audit cargo-insta cargo-release default-target mdbook
-    mdbook-admonish mdbook-footnote mdbook-toc wasm-bindgen-cli wasm-opt
-    wasm-pack
 
 tasks:
-  # main installer is "setup-dev" which calls other tasks
-  setup-dev:
-    preconditions:
-      - sh: which clang
-        msg: |
-          🔴 Can't find `clang`, which is required to install a full development environment (we use `duckdb` in our tests, which requires it).
-
-          Please install it. On MacOS, that's
-
-            xcode-select --install
-
-          On Debian Linux, that's
-
-            apt-get update && apt-get install clang
-
-    desc: Install tools for PRQL development.
-    cmds:
-      - task: install-cargo-tools
-      - task: install-brew-dependencies
-      - task: install-maturin
-      - task: install-pre-commit
-      - task: install-npm-dependencies
-      # We only suggest, rather than install; we don't want to intrude (maybe
-      # we're being too conservative?).
-      - task: suggest-vscode-extensions
-      - pre-commit install-hooks
-      - cmd: |
-          echo "
-          🟢 Setup complete! ✅🚀"
-        silent: true
-
-  install-cargo-tools:
-    desc: Install cargo tools for PRQL development.
-    cmds:
-      # In CI we use `binstall`, because it's faster, and without it we can't
-      # even get the arm64 docker image to build within the GHA timeout. But it
-      # produces lots of confusing warning messages about 429 errors, I think
-      # because it's querying GitHub for so many packages; so we only use it for
-      # CI atm. If the warnings were less alarming, we could use for all
-      # installs.
-      #
-      # `--locked` installs from the underlying lock files (which is not the
-      # default...)
-      - |
-        {{ if .CI }}
-          task install-cargo-tools-binstall
-        {{ else }}
-          task install-cargo-tools-source
-        {{ end }}
-
-      - cmd: |
-          [ "$(which cargo-insta)" ] || echo "🔴 Can't find a binary that cargo just installed. Is the cargo bin path (generally at ~/.cargo/bin) on the \$PATH?"
-        silent: true
-
-  install-cargo-tools-source:
-    cmds:
-      - cargo install --locked {{.cargo_crates}}
-
-  install-cargo-tools-binstall:
-    cmds:
-      - cmd:
-          curl -L --proto '=https' --tlsv1.2 -sSf
-          https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh
-          | bash
-        platforms: [linux, darwin]
-      - cargo binstall -y --locked {{.cargo_crates}}
-
-  install-maturin:
-    desc: Install maturin.
-    cmds:
-      - python3 -m pip install -U maturin
-
   suggest-vscode-extensions:
     desc: Check and suggest VS Code extensions.
     vars:
@@ -136,14 +46,6 @@ tasks:
           code --install-extension {{.}}
         {{ end -}}
 
-  install-pre-commit:
-    # Someone might have this installed with `brew`,
-    # so only install if it can't be found.
-    status:
-      - which pre-commit
-    cmds:
-      - python3 -m pip install -U pre-commit
-
   install-brew-dependencies:
     status:
       - which hugo
@@ -173,18 +75,6 @@ tasks:
           https://github.com/NiklasPor/prettier-plugin-go-template/issues/58#issuecomment-1085060511
           for more info."
         silent: true
-
-  build-all:
-    desc: Build everything.
-
-    summary: |
-      Build everything.
-
-      Running this isn't required when developing; it's for caching or as a reference.
-    cmds:
-      - cargo build --all-targets --all-features
-      - cargo build --all-targets --all-features --target=wasm32-unknown-unknown
-      - task: build-web
 
   test-all:
     desc: Test everything, accepting snapshots.
@@ -239,26 +129,6 @@ tasks:
     cmds:
       - cargo insta test --accept -p prql-compiler --lib -- --quiet
 
-  build-web:
-    desc: Build the website, including the book & playground.
-    dir: web
-    cmds:
-      - cd website && hugo --minify
-      - cd book && mdbook build
-      - mkdir -p website/public
-      # Copy the book into the website path, using rsync so it only copies new files
-      - rsync -ai --checksum --delete book/book/ website/public/book/
-      # Must set `install-links=false` in the playground's `npm install` to
-      # install prql-js as the regular dependency, instead of creating a
-      # symlink. Refer to https://github.com/PRQL/prql/pull/1296.
-      - cd playground && npm install --install-links=false
-      - cd playground && npm run build
-      # We place the playground app in a nested path, because we want to use
-      # prql-lang.org/playground with an iframe containing the playground.
-      # Possibly there's a more elegant way of doing this...
-      - rsync -ai --checksum --delete playground/build/
-        website/public/playground/playground/
-
   test-js:
     dir: bindings/prql-js
     cmds:
@@ -273,36 +143,6 @@ tasks:
       - mix deps.get --force
       - mix compile
       - mix test
-
-  run-website:
-    desc: Build & serve the static website.
-    dir: web/website
-    cmds:
-      - hugo server
-
-  run-web:
-    desc: Build & serve the website & playground.
-    summary:
-      Note that this only live-reloads the static website; and requires
-      rerunning to pick up playground & book changes.
-    dir: web/website
-    cmds:
-      - task: build-web
-      # Then start web server with rendering to disk, so it picks up the playground files.
-      - hugo server --renderToDisk
-
-  run-book:
-    desc: Build & serve the book.
-    dir: web/book
-    cmds:
-      - mdbook serve --port=3000
-
-  run-playground:
-    desc: Build & serve the playground.
-    dir: web/playground
-    cmds:
-      - npm install --install-links=false
-      - npm start
 
   run-playground-cached:
     desc: Build & serve the playground, without rebuilding rust code.
@@ -327,35 +167,3 @@ tasks:
       - package.json
     generates:
       - node_modules/*
-# The next three tasks are not used for either:
-#  - the Dockerfile (installing brew takes forever)
-#    so the Dockerfile simply installs hugo & nodejs directly
-#  - the "desktop setup" - it uses other tasks in the Taskfile.yml
-# They remain in the Taskfile.yml as a hint if they should ever be needed
-
-# install-brew:
-#   # Initially added for building Docker container
-#   status:
-#     - which brew
-#   cmds:
-#     # https://stackoverflow.com/questions/58292862/how-to-install-homebrew-on-ubuntu-inside-docker-container
-#     - useradd -m -s /bin/zsh linuxbrew
-#     - usermod -aG sudo linuxbrew
-#     - mkdir -p /home/linuxbrew/.linuxbrew
-#     - chown -R linuxbrew /home/linuxbrew/.linuxbrew
-#     - export HOMEBREW_INSTALL_FROM_API=1
-#     - /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
-#     - chown -R $CONTAINER_USER: /home/linuxbrew/.linuxbrew
-
-# install-hugo:
-#   cmds:
-#     # - /home/linuxbrew/.linuxbrew/bin/brew install hugo
-#     - curl -L https://github.com/gohugoio/hugo/releases/download/v0.91.2/hugo_0.91.2_Linux-64bit.deb -o hugo.deb
-#     - apt install ./hugo.deb
-
-# install-nodejs:
-#   cmds:
-#     # - /home/linuxbrew/.linuxbrew/bin/brew install nodejs
-#     - curl -fsSL https://deb.nodesource.com/setup_16.x | bash -
-#     - apt install -y nodejs
-#     - cd /app/playground/ ; npm install

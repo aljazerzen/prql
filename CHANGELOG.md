@@ -149,8 +149,8 @@ A small selection of the changes:
 - We've changed how we handle colors.
 
   `Options::color` is deprecated and has no effect. Code which consumes
-  `prqlc_main::compile` should instead accept the output with colors and use
-  a library such as `anstream` to handle the presentation of colors. To ensure
+  `prqlc_main::compile` should instead accept the output with colors and use a
+  library such as `anstream` to handle the presentation of colors. To ensure
   minimal disruption, `prql_compiler` will currently strip color codes when a
   standard environment variable such as `CLI_COLOR=0` is set or when it detects
   `stderr` is not a TTY.

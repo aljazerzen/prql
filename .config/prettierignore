@@ -1,0 +1,16 @@
+../target
+../prqlc/bindings/js/dist
+
+../web/playground/build
+../web/website/public
+../web/book/book
+../web/book/theme/highlight.js
+
+*.rs
+*.min.*
+
+# TODO: move these into content out of layouts
+../web/website/themes/prql-theme/layouts/_default/_markup/render-link.html
+
+# TODO: fix the go-template issue in `.prettierrc.yaml`
+**/*.html

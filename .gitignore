@@ -31,3 +31,4 @@ _*.sql
 *.my.csv
 
 cobertura.xml
+.pre-commit-config.yaml

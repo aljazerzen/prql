@@ -1,0 +1,10 @@
+proseWrap: always
+#plugins:
+#  - "prettier-plugin-go-template"
+#
+#overrides:
+#   https://github.com/NiklasPor/prettier-plugin-go-template
+#  - files:
+#      - "*.html"
+#    options:
+#      parser: "go-template"
