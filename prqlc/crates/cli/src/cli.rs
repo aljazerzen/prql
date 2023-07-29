@@ -16,10 +16,10 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 
+use prqlc_main::ir::Span;
 use prqlc_main::semantic;
 use prqlc_main::semantic::reporting::{collect_frames, label_references};
 use prqlc_main::{downcast, Options, Target};
-use prqlc_main::{ir::pl::Lineage, ir::Span};
 use prqlc_main::{pl_to_prql, pl_to_rq_tree, prql_to_pl, prql_to_pl_tree, rq_to_sql, SourceTree};
 
 use crate::watch;
@@ -463,7 +463,7 @@ fn read_files(input: &mut clio::ClioPath) -> Result<SourceTree> {
     Ok(SourceTree::new(sources))
 }
 
-fn combine_prql_and_frames(source: &str, frames: Vec<(Span, Lineage)>) -> String {
+fn combine_prql_and_frames(source: &str, frames: Vec<(Span, String)>) -> String {
     let source = Source::from(source);
     let lines = source.lines().collect_vec();
     let width = lines.iter().map(|l| l.len()).max().unwrap_or(0);

@@ -4,9 +4,8 @@ use std::ops::Range;
 use anyhow::{Ok, Result};
 use ariadne::{Color, Label, Report, ReportBuilder, ReportKind, Source};
 
-use super::context::{DeclKind, TableDecl, TableExpr};
+use super::context::{Context, DeclKind, TableDecl, TableExpr};
 use super::NS_DEFAULT_DB;
-use super::{Context, Lineage};
 use crate::ir::pl::*;
 use crate::Span;
 
@@ -128,7 +127,7 @@ impl<'a> PlFold for Labeler<'a> {
     }
 }
 
-pub fn collect_frames(expr: Expr) -> Vec<(Span, Lineage)> {
+pub fn collect_frames(expr: Expr) -> Vec<(Span, String)> {
     let mut collector = FrameCollector { frames: vec![] };
 
     collector.fold_expr(expr).unwrap();
@@ -139,7 +138,7 @@ pub fn collect_frames(expr: Expr) -> Vec<(Span, Lineage)> {
 
 /// Traverses AST and collects all node.frame
 struct FrameCollector {
-    frames: Vec<(Span, Lineage)>,
+    frames: Vec<(Span, String)>,
 }
 
 impl PlFold for FrameCollector {

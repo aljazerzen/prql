@@ -13,7 +13,6 @@ use crate::{Error, Reason, WithErrorInfo};
 
 use super::super::context::{Decl, DeclKind};
 use super::super::module::Module;
-use super::Lineage;
 use super::Resolver;
 use super::NS_PARAM;
 
@@ -654,29 +653,6 @@ fn append_relations(mut top: Ty, mut bottom: Ty) -> Result<Ty, Error> {
 
     top_fields.extend(fields);
     Ok(top)
-}
-
-impl Lineage {
-    pub fn find_input(&self, input_name: &str) -> Option<&LineageInput> {
-        self.inputs.iter().find(|i| i.name == input_name)
-    }
-
-    /// Renames all frame inputs to given alias.
-    pub fn rename(&mut self, alias: String) {
-        for input in &mut self.inputs {
-            input.name = alias.clone();
-        }
-
-        for col in &mut self.columns {
-            match col {
-                LineageColumn::All { input_name, .. } => *input_name = alias.clone(),
-                LineageColumn::Single {
-                    name: Some(name), ..
-                } => name.path = vec![alias.clone()],
-                _ => {}
-            }
-        }
-    }
 }
 
 // Expects closure's args to be resolved.

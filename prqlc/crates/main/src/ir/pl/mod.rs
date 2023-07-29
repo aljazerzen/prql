@@ -11,7 +11,6 @@
 mod expr;
 mod extra;
 mod fold;
-mod lineage;
 mod stmt;
 mod types;
 mod utils;
@@ -24,7 +23,6 @@ use crate::{ir::rq::Query, sql::internal::SqlTransform, SourceTree, Span};
 pub use self::expr::*;
 pub use self::extra::expr::*;
 pub use self::fold::*;
-pub use self::lineage::*;
 pub use self::stmt::*;
 pub use self::types::*;
 pub use self::utils::*;
@@ -47,9 +45,6 @@ pub fn print_mem_sizes() {
     println!("{:16}= {}", "FuncParam", size_of::<FuncParam>());
     println!("{:16}= {}", "InterpolateItem", size_of::<InterpolateItem>());
     println!("{:16}= {}", "JoinSide", size_of::<JoinSide>());
-    println!("{:16}= {}", "Lineage", size_of::<Lineage>());
-    println!("{:16}= {}", "LineageColumn", size_of::<LineageColumn>());
-    println!("{:16}= {}", "LineageInput", size_of::<LineageInput>());
     println!("{:16}= {}", "ModuleDef", size_of::<ModuleDef>());
     println!("{:16}= {}", "PrimitiveSet", size_of::<PrimitiveSet>());
     println!("{:16}= {}", "Query", size_of::<Query>());
