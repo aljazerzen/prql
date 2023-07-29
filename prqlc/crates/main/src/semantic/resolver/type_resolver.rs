@@ -258,6 +258,9 @@ impl Resolver {
 
             _ => return Ok(None),
         };
+
+        lineage = lineage.or(expr.id);
+
         Ok(Some(Ty {
             lineage,
             instance_of,

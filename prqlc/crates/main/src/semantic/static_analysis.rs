@@ -3,29 +3,20 @@
 use crate::ir::pl::{Expr, ExprKind, Literal};
 
 pub fn static_analysis(mut expr: Expr) -> Expr {
-    expr.kind = eval(expr.kind);
-
-    if expr.kind.is_literal() {
-        expr.ty = None;
-    }
-    expr
-}
-
-fn eval(kind: ExprKind) -> ExprKind {
-    match kind {
+    match expr.kind {
         ExprKind::RqOperator { name, mut args } => {
             match name.as_str() {
                 "std.not" => {
                     if let ExprKind::Literal(Literal::Boolean(val)) = &args[0].kind {
-                        return ExprKind::Literal(Literal::Boolean(!val));
+                        return Expr::new(Literal::Boolean(!val));
                     }
                 }
                 "std.neg" => match &args[0].kind {
                     ExprKind::Literal(Literal::Integer(val)) => {
-                        return ExprKind::Literal(Literal::Integer(-val))
+                        return Expr::new(Literal::Integer(-val))
                     }
                     ExprKind::Literal(Literal::Float(val)) => {
-                        return ExprKind::Literal(Literal::Float(-val))
+                        return Expr::new(Literal::Float(-val))
                     }
                     _ => (),
                 },
@@ -36,7 +27,7 @@ fn eval(kind: ExprKind) -> ExprKind {
                     {
                         // don't eval comparisons between different types of literals
                         if left.as_ref() == right.as_ref() {
-                            return ExprKind::Literal(Literal::Boolean(left == right));
+                            return Expr::new(Literal::Boolean(left == right));
                         }
                     }
                 }
@@ -46,7 +37,7 @@ fn eval(kind: ExprKind) -> ExprKind {
                     {
                         // don't eval comparisons between different types of literals
                         if left.as_ref() == right.as_ref() {
-                            return ExprKind::Literal(Literal::Boolean(left != right));
+                            return Expr::new(Literal::Boolean(left != right));
                         }
                     }
                 }
@@ -56,7 +47,7 @@ fn eval(kind: ExprKind) -> ExprKind {
                         ExprKind::Literal(Literal::Boolean(right)),
                     ) = (&args[0].kind, &args[1].kind)
                     {
-                        return ExprKind::Literal(Literal::Boolean(*left && *right));
+                        return Expr::new(Literal::Boolean(*left && *right));
                     }
                 }
                 "std.or" => {
@@ -65,18 +56,19 @@ fn eval(kind: ExprKind) -> ExprKind {
                         ExprKind::Literal(Literal::Boolean(right)),
                     ) = (&args[0].kind, &args[1].kind)
                     {
-                        return ExprKind::Literal(Literal::Boolean(*left || *right));
+                        return Expr::new(Literal::Boolean(*left || *right));
                     }
                 }
                 "std.coalesce" => {
                     if let ExprKind::Literal(Literal::Null) = &args[0].kind {
-                        return args.remove(1).kind;
+                        return args.remove(1);
                     }
                 }
 
                 _ => {}
             };
-            ExprKind::RqOperator { name, args }
+            expr.kind = ExprKind::RqOperator { name, args };
+            expr
         }
 
         ExprKind::Case(items) => {
@@ -95,7 +87,7 @@ fn eval(kind: ExprKind) -> ExprKind {
                 }
             }
             if res.is_empty() {
-                return ExprKind::Literal(Literal::Null);
+                return Expr::new(Literal::Null);
             }
 
             if res.len() == 1 {
@@ -104,13 +96,14 @@ fn eval(kind: ExprKind) -> ExprKind {
                     ExprKind::Literal(Literal::Boolean(true))
                 );
                 if is_true {
-                    return res.remove(0).value.kind;
+                    return *res.remove(0).value;
                 }
             }
 
-            ExprKind::Case(res)
+            expr.kind = ExprKind::Case(res);
+            expr
         }
 
-        k => k,
+        _ => expr,
     }
 }
