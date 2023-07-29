@@ -237,9 +237,11 @@ impl Module {
                 let mut sub_mod = Module::default();
 
                 if let Some(instance_of) = &ty.instance_of {
+                    let lineage = ty.lineage.unwrap();
+
                     let self_decl = Decl {
                         declared_at: None,
-                        kind: DeclKind::InstanceOf(instance_of.clone()),
+                        kind: DeclKind::InstanceOf { table_fq: instance_of.clone(), lineage },
                         ..Default::default()
                     };
                     sub_mod.names.insert(NS_SELF.to_string(), self_decl);

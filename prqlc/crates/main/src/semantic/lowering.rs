@@ -558,42 +558,7 @@ impl Lowerer {
 
         log::debug!("push_select of a frame: {:?}", fields);
 
-        let mut columns = Vec::new();
-
-        // normal columns
-        for col in &fields {
-            match col {
-                TupleField::Single(name, ty) => {
-                    let lineage = ty.as_ref().unwrap().lineage.unwrap();
-                    let cid = self.lookup_cid(lineage, name.as_ref())?;
-
-                    columns.push((RelationColumn::Single(name.clone()), cid));
-                }
-                TupleField::All { exclude, .. } => {
-                    let input_id = tuple.lineage.unwrap();
-
-                    match &self.node_mapping[&input_id] {
-                        LoweredTarget::Compute(_cid) => unreachable!(),
-                        LoweredTarget::Input(input_cols) => {
-                            let mut input_cols = input_cols
-                                .iter()
-                                .filter(|(c, _)| match c {
-                                    RelationColumn::Single(Some(name)) => {
-                                        !exclude.contains(&Ident::from_name(name))
-                                    }
-                                    _ => true,
-                                })
-                                .collect_vec();
-                            input_cols.sort_by_key(|e| e.1 .1);
-
-                            for (col, (cid, _)) in input_cols {
-                                columns.push((col.clone(), *cid));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let columns = self.lookup_cids_of_tuple(fields)?;
 
         let (cols, cids) = columns.into_iter().unzip();
 
@@ -610,40 +575,19 @@ impl Lowerer {
     ) -> Result<Vec<CId>> {
         let mut r = Vec::with_capacity(exprs.len());
         for expr in exprs {
-            let pl::ExprKind::TupleExclude { .. } = expr.kind else {
-                // base case
-                r.push(self.declare_as_column(expr, is_aggregation)?);
-                continue;
-            };
-
-            // special case: ExprKind::All
-            let mut selected = Vec::<CId>::new();
-            for target_id in vec![expr.target_id.unwrap()] {
-                // TODO: target_ids
-                match &self.node_mapping[&target_id] {
-                    LoweredTarget::Compute(cid) => {
-                        selected.push(*cid);
-                    }
-                    LoweredTarget::Input(input) => {
-                        let mut cols = input.iter().collect_vec();
-                        cols.sort_by_key(|c| c.1 .1);
-                        selected.extend(cols.into_iter().map(|(_, (cid, _))| cid));
-                    }
+            match expr.kind {
+                pl::ExprKind::TupleExclude { .. } => {
+                    // special case: wildcard
+                    let fields = expr.ty.unwrap().kind.into_tuple().unwrap();
+                    let columns = self.lookup_cids_of_tuple(fields)?;
+                    r.extend(columns.into_iter().map(|(_, cid)| cid));
+                }
+                _ => {
+                    // base case
+                    r.push(self.declare_as_column(expr, is_aggregation)?);
+                    continue;
                 }
             }
-
-            todo!();
-            // let exclude: HashSet<CId> = exclude
-            // .into_iter()
-            // .filter(|e| e.target_id.is_some())
-            // .map(|e| {
-            //     let id = e.target_id.unwrap();
-            //     self.lookup_cid(id, Some(&e.kind.into_ident().unwrap().name))
-            // })
-            // .try_collect()?;
-            // selected.retain(|c| !exclude.contains(c));
-
-            // r.extend(selected);
         }
         Ok(r)
     }
@@ -870,6 +814,47 @@ impl Lowerer {
         };
 
         Ok(cid)
+    }
+
+    fn lookup_cids_of_tuple(
+        &mut self,
+        fields: Vec<TupleField>,
+    ) -> Result<Vec<(RelationColumn, CId)>> {
+        let mut columns = Vec::new();
+        for col in &fields {
+            match col {
+                TupleField::Single(name, ty) => {
+                    let lineage = ty.as_ref().unwrap().lineage.unwrap();
+                    let cid = self.lookup_cid(lineage, name.as_ref())?;
+
+                    columns.push((RelationColumn::Single(name.clone()), cid));
+                }
+                TupleField::All { exclude, ty } => {
+                    let input_id = ty.as_ref().unwrap().lineage.unwrap();
+
+                    match &self.node_mapping[&input_id] {
+                        LoweredTarget::Compute(_cid) => unreachable!(),
+                        LoweredTarget::Input(input_cols) => {
+                            let mut input_cols = input_cols
+                                .iter()
+                                .filter(|(c, _)| match c {
+                                    RelationColumn::Single(Some(name)) => {
+                                        !exclude.contains(&Ident::from_name(name))
+                                    }
+                                    _ => true,
+                                })
+                                .collect_vec();
+                            input_cols.sort_by_key(|e| e.1 .1);
+
+                            for (col, (cid, _)) in input_cols {
+                                columns.push((col.clone(), *cid));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(columns)
     }
 }
 

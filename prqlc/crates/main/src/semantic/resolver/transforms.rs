@@ -392,10 +392,10 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
 
 impl Resolver {
     /// Wraps non-tuple Exprs into a singleton Tuple.
-    // This function should eventually be applied to all function arguments that
-    // expect a tuple.
     pub fn coerce_into_tuple(&mut self, expr: Expr) -> Result<Expr> {
-        Ok(if !expr.ty.as_ref().unwrap().is_tuple() {
+        let is_tuple = expr.ty.as_ref().unwrap().is_tuple()
+            && !(expr.kind.is_tuple_exclude() || expr.kind.is_tuple_fields());
+        Ok(if !is_tuple {
             let expr = Expr::new(ExprKind::Tuple(vec![expr]));
 
             self.fold_expr(expr)?

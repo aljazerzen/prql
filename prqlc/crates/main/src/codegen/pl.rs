@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use crate::codegen::SeparatedExprs;
 use crate::ir::pl::*;
 
@@ -81,10 +83,18 @@ impl WriteSource for TyKind {
 impl WriteSource for TupleField {
     fn write(&self, opt: WriteOpt) -> Option<String> {
         match self {
-            Self::All { ty: generic_el, .. } => match generic_el {
-                Some(el) => Some(format!("{}..", el.write(opt)?)),
-                None => Some("*..".to_string()),
-            },
+            Self::All { ty, exclude } => {
+                let mut r = match ty {
+                    Some(el) => format!("{}..", el.write(opt)?),
+                    None => "*..".to_string(),
+                };
+
+                if !exclude.is_empty() {
+                    r += &format!("!{{{}}}", exclude.iter().map(Ident::to_string).join(","));
+                }
+
+                Some(r)
+            }
             Self::Single(name, expr) => {
                 let mut r = String::new();
 

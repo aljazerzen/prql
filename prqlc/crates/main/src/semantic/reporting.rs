@@ -82,7 +82,7 @@ impl<'a> PlFold for Labeler<'a> {
                     let color = match &decl.kind {
                         DeclKind::Expr(_) => Color::Blue,
                         DeclKind::Column { .. } => Color::Yellow,
-                        DeclKind::InstanceOf(_) => Color::Yellow,
+                        DeclKind::InstanceOf { .. } => Color::Yellow,
                         DeclKind::TableDecl { .. } => Color::Red,
                         DeclKind::Module(_) => Color::Cyan,
                         DeclKind::LayeredModules(_) => Color::Cyan,
@@ -145,11 +145,8 @@ struct FrameCollector {
 impl PlFold for FrameCollector {
     fn fold_expr(&mut self, expr: Expr) -> Result<Expr> {
         if matches!(expr.kind, ExprKind::TransformCall(_)) {
-            if let Some(span) = expr.span {
-                let lineage = expr.lineage.clone();
-                if let Some(lineage) = lineage {
-                    self.frames.push((span, lineage));
-                }
+            if let Some(_) = expr.span {
+                // TODO: collect lineage
             }
         }
 

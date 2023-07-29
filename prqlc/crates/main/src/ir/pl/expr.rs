@@ -9,7 +9,7 @@ use prqlc_ast::Span;
 
 pub use prqlc_ast::expr::{BinOp, UnOp};
 
-use super::{Lineage, TransformCall, Ty, TyOrExpr};
+use super::{TransformCall, Ty, TyOrExpr};
 
 // The following code is tested by the tests_misc crate to match expr.rs in prql_ast.
 
@@ -38,13 +38,6 @@ pub struct Expr {
     /// [None] means that type should be inferred.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ty: Option<Ty>,
-
-    /// Information about where data of this expression will come from.
-    ///
-    /// Currently, this is used to infer relational pipeline frames.
-    /// Must always exists if ty is a relation.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lineage: Option<Lineage>,
 
     #[serde(skip)]
     pub needs_window: bool,
@@ -106,8 +99,8 @@ pub enum ExprKind {
     /// ```
     TupleFields(Vec<Expr>),
 
-    /// An indirection (field access), but instead of selecting mentioned columns,
-    /// selecting all unmentioned and producing a tuple of that fields.
+    /// An indirection (field access), but instead of selecting mentioned fields,
+    /// selecting all unmentioned fields and as TupleFields.
     TupleExclude {
         expr: Box<Expr>,
 

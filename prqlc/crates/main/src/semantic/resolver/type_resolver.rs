@@ -122,6 +122,8 @@ impl Resolver {
         if let Some(ty) = &expr.ty {
             return Ok(Some(ty.clone()));
         }
+        let mut lineage = None;
+        let mut instance_of = None;
 
         let kind = match &expr.kind {
             ExprKind::Literal(ref literal) => match literal {
@@ -154,8 +156,11 @@ impl Resolver {
                 for field in fields {
                     let ty = self.infer_type(field)?;
 
-                    if let ExprKind::TupleFields(_) = &field.kind {
-                        ty_fields.extend(ty.unwrap().kind.into_tuple().unwrap());
+                    if let ExprKind::TupleFields(_) | ExprKind::TupleExclude { .. } = &field.kind {
+                        let ty = ty.unwrap();
+                        ty_fields.extend(ty.kind.into_tuple().unwrap());
+                        lineage = lineage.or(ty.lineage);
+                        instance_of = instance_of.or(ty.instance_of);
                         continue;
                     }
 
@@ -183,7 +188,10 @@ impl Resolver {
             }
             ExprKind::TupleExclude { expr, exclude } => {
                 // TODO: handle non-tuples gracefully
-                let tuple = expr.ty.as_ref().unwrap().kind.as_tuple().unwrap();
+                let ty = expr.ty.as_ref().unwrap();
+                lineage = ty.lineage;
+                instance_of = ty.instance_of.clone();
+                let tuple = ty.kind.as_tuple().unwrap();
 
                 // special case: all
                 if let Some((t, e)) = tuple.iter().find_map(|c| c.as_all()) {
@@ -196,6 +204,12 @@ impl Resolver {
 
                     let mut e = e.clone();
                     e.extend(exclude.iter().cloned());
+
+                    let mut t = t.clone();
+                    if let Some(t) = &mut t {
+                        t.lineage = lineage.clone();
+                        t.instance_of = instance_of.clone();
+                    }
 
                     TyKind::Tuple(vec![TupleField::All {
                         ty: t.clone(),
@@ -244,7 +258,11 @@ impl Resolver {
 
             _ => return Ok(None),
         };
-        Ok(Some(Ty::from(kind)))
+        Ok(Some(Ty {
+            lineage,
+            instance_of,
+            ..Ty::from(kind)
+        }))
     }
 
     /// Validates that found node has expected type. Returns assumed type of the node.

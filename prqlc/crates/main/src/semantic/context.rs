@@ -44,7 +44,10 @@ pub enum DeclKind {
 
     TableDecl(TableDecl),
 
-    InstanceOf(Ident),
+    InstanceOf {
+        table_fq: Ident,
+        lineage: usize,
+    },
 
     Column(Ty),
 
@@ -192,7 +195,10 @@ impl std::fmt::Display for DeclKind {
                     ty.as_ref().map(|t| t.to_string()).unwrap_or_default()
                 )
             }
-            Self::InstanceOf(arg0) => write!(f, "InstanceOf: {arg0}"),
+            Self::InstanceOf {
+                table_fq: arg0,
+                lineage: _,
+            } => write!(f, "InstanceOf: {arg0}"),
             Self::Column(arg0) => write!(f, "Column (target {arg0})"),
             Self::Infer(arg0) => write!(f, "Infer (default: {arg0})"),
             Self::Expr(arg0) => write!(f, "Expr: {}", write_pl(*arg0.clone())),

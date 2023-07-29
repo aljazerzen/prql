@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use prqlc_ast::expr::Ident;
 
-use crate::ir::pl::{Annotation, Expr, ExprKind, TupleField, Ty, TyKind};
+use crate::ir::pl::{Annotation, Expr, ExprKind, TupleField};
 use crate::semantic::context::{Decl, DeclKind, TableDecl, TableExpr};
 use crate::semantic::{
     Context, Module, NS_DEFAULT_DB, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS,
@@ -184,9 +184,9 @@ impl Context {
 
         // infer table columns
         if let Some(decl) = module.names.get(NS_SELF).cloned() {
-            if let DeclKind::InstanceOf(table_ident) = decl.kind {
-                log::debug!("inferring {original} to be from table {table_ident}");
-                self.infer_table_column(&table_ident, &original.name)?;
+            if let DeclKind::InstanceOf { table_fq, .. } = decl.kind {
+                log::debug!("inferring {original} to be from table {table_fq}");
+                self.infer_table_column(&table_fq, &original.name)?;
             }
         }
 
@@ -197,22 +197,31 @@ impl Context {
         let mod_ident = self.find_module_of_wildcard(ident)?;
         let mod_decl = self.root_mod.get(&mod_ident).unwrap();
 
-        let instance_of = mod_decl.kind.as_instance_of().unwrap();
+        let (instance_of, _) = mod_decl.kind.as_instance_of().unwrap();
         let decl = self.root_mod.get(instance_of).unwrap();
         let decl = decl.kind.as_table_decl().unwrap();
 
-        let fields = decl.ty.clone().unwrap().into_relation().unwrap();
+        let fields = decl.ty.as_ref().unwrap().as_relation().unwrap();
 
-        // This is just a workaround to return an Ident from this function.
+        let fields = fields
+            .iter()
+            .flat_map(|f| match f {
+                TupleField::Single(None, _) => None,
+                TupleField::Single(Some(name), _) => {
+                    Some(Expr::new(mod_ident.clone() + Ident::from_name(name)))
+                }
+                TupleField::All { exclude, .. } => Some(Expr::new(ExprKind::TupleExclude {
+                    expr: Box::new(Expr::new(mod_ident.clone())),
+                    exclude: exclude.clone(),
+                })),
+            })
+            .collect_vec();
+
+        // This a clever way of returning an arbitrary Expr from this function.
         // We wrap the expr into DeclKind::Expr and save it into context.
-        let cols_expr = Expr {
-            ty: Some(Ty {
-                instance_of: Some(instance_of.clone()),
-                ..Ty::from(TyKind::Tuple(fields))
-            }),
-            ..Expr::new(ExprKind::TupleFields(vec![]))
-        };
-        let cols_expr = DeclKind::Expr(Box::new(cols_expr));
+        let tuple_with_all_cols = Expr::new(ExprKind::TupleFields(fields));
+
+        let cols_expr = DeclKind::Expr(Box::new(tuple_with_all_cols));
         let save_as = "_wildcard_match";
         self.root_mod
             .names

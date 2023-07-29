@@ -309,7 +309,7 @@ pub mod test {
                   columns:
                     - - Wildcard
                       - 0
-                  name: employees
+                  name: ~
               - Select:
                   - 0
           columns:

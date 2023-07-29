@@ -309,19 +309,25 @@ impl PlFold for Resolver {
                         _ => self.fold_expr(expr.as_ref().clone())?,
                     },
 
-                    DeclKind::InstanceOf(_) => {
-                        return Err(Error::new_simple(
-                            "table instance cannot be referenced directly",
-                        )
-                        .with_span(span)
-                        .push_hint("did you forget to specify the column name?")
-                        .into());
+                    DeclKind::InstanceOf { table_fq, lineage } => {
+                        let decl = self.context.root_mod.get(table_fq).unwrap();
+                        let decl = decl.kind.as_table_decl().unwrap();
+                        let mut ty = *decl.ty.clone().unwrap().kind.into_array().unwrap();
+
+                        ty.instance_of = Some(table_fq.clone());
+                        ty.lineage = Some(*lineage);
+
+                        Expr {
+                            kind: ExprKind::Ident(fq_ident),
+                            ty: Some(ty),
+                            ..node
+                        }
                     }
 
-                    _ => Expr {
-                        kind: ExprKind::Ident(fq_ident),
-                        ..node
-                    },
+                    d => {
+                        // ident must provide the type of the expr
+                        unreachable!("{d}")
+                    }
                 }
             }
 
@@ -329,11 +335,18 @@ impl PlFold for Resolver {
                 if (name.kind.as_ident()).map_or(false, |i| i.to_string() == "std.not")
                     && matches!(args[0].kind, ExprKind::Tuple(_)) =>
             {
-                let mut this = Expr::new(ExprKind::Ident(Ident::from_path(vec![NS_THIS, "*"])));
-                this.span = span;
+                let this_fields = Expr {
+                    span,
+                    ..Expr::new(ExprKind::Ident(Ident::from_path(vec![NS_THIS, "*"])))
+                };
+                let this = Expr {
+                    span,
+                    ..Expr::new(ExprKind::Tuple(vec![this_fields]))
+                };
                 let this = self.fold_expr(this)?;
 
                 let exclude_tuple = args.into_iter().exactly_one().unwrap();
+                let exclude_tuple = self.fold_expr(exclude_tuple)?;
 
                 create_tuple_exclude(this, exclude_tuple, span)?
             }
@@ -425,7 +438,9 @@ pub(super) fn create_tuple_exclude(
     exclude_tuple: Expr,
     span: Option<Span>,
 ) -> Result<Expr> {
+    // this should not fail because of type checking
     let exclude = exclude_tuple.ty.unwrap().kind.into_tuple().unwrap();
+
     let exclude = exclude
         .into_iter()
         .filter_map(|x| match x {
@@ -1176,84 +1191,79 @@ pub(super) mod test {
             kind:
               Tuple:
                 - Single:
-                    - ~
+                    - track_id
                     - kind:
-                        Tuple:
-                          - Single:
-                              - track_id
-                              - kind:
-                                  Union:
-                                    - - int
-                                      - kind:
-                                          Primitive: Int
-                                        name: int
-                                    - - float
-                                      - kind:
-                                          Primitive: Float
-                                        name: float
-                                    - - bool
-                                      - kind:
-                                          Primitive: Bool
-                                        name: bool
-                                    - - text
-                                      - kind:
-                                          Primitive: Text
-                                        name: text
-                                    - - date
-                                      - kind:
-                                          Primitive: Date
-                                        name: date
-                                    - - time
-                                      - kind:
-                                          Primitive: Time
-                                        name: time
-                                    - - timestamp
-                                      - kind:
-                                          Primitive: Timestamp
-                                        name: timestamp
-                                    - - ~
-                                      - kind:
-                                          Singleton: "Null"
-                                name: scalar
-                                lineage: 181
-                          - Single:
-                              - price
-                              - kind:
-                                  Union:
-                                    - - int
-                                      - kind:
-                                          Primitive: Int
-                                        name: int
-                                    - - float
-                                      - kind:
-                                          Primitive: Float
-                                        name: float
-                                    - - bool
-                                      - kind:
-                                          Primitive: Bool
-                                        name: bool
-                                    - - text
-                                      - kind:
-                                          Primitive: Text
-                                        name: text
-                                    - - date
-                                      - kind:
-                                          Primitive: Date
-                                        name: date
-                                    - - time
-                                      - kind:
-                                          Primitive: Time
-                                        name: time
-                                    - - timestamp
-                                      - kind:
-                                          Primitive: Timestamp
-                                        name: timestamp
-                                    - - ~
-                                      - kind:
-                                          Singleton: "Null"
-                                name: scalar
-                                lineage: 181
-                      lineage: 212
+                        Union:
+                          - - int
+                            - kind:
+                                Primitive: Int
+                              name: int
+                          - - float
+                            - kind:
+                                Primitive: Float
+                              name: float
+                          - - bool
+                            - kind:
+                                Primitive: Bool
+                              name: bool
+                          - - text
+                            - kind:
+                                Primitive: Text
+                              name: text
+                          - - date
+                            - kind:
+                                Primitive: Date
+                              name: date
+                          - - time
+                            - kind:
+                                Primitive: Time
+                              name: time
+                          - - timestamp
+                            - kind:
+                                Primitive: Timestamp
+                              name: timestamp
+                          - - ~
+                            - kind:
+                                Singleton: "Null"
+                      name: scalar
+                      lineage: 193
+                - Single:
+                    - price
+                    - kind:
+                        Union:
+                          - - int
+                            - kind:
+                                Primitive: Int
+                              name: int
+                          - - float
+                            - kind:
+                                Primitive: Float
+                              name: float
+                          - - bool
+                            - kind:
+                                Primitive: Bool
+                              name: bool
+                          - - text
+                            - kind:
+                                Primitive: Text
+                              name: text
+                          - - date
+                            - kind:
+                                Primitive: Date
+                              name: date
+                          - - time
+                            - kind:
+                                Primitive: Time
+                              name: time
+                          - - timestamp
+                            - kind:
+                                Primitive: Timestamp
+                              name: timestamp
+                          - - ~
+                            - kind:
+                                Singleton: "Null"
+                      name: scalar
+                      lineage: 193
         "###);
 
         assert_yaml_snapshot!(resolve_ty(
