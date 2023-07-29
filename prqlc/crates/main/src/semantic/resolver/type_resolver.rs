@@ -142,11 +142,26 @@ impl Resolver {
                 // an ident should always provide the type of what it is referring to
                 unreachable!()
             }
-            ExprKind::FuncCall(_) => return Ok(None),
+            ExprKind::FuncCall(_) => {
+                // function calls should be resolved to [ExprKind::Func] or evaluated away.
+                unreachable!()
+            },
 
-            ExprKind::SString(_) => return Ok(None),
+            ExprKind::SString(_) => return Ok(Some(self.context.find_std_type("scalar"))),
             ExprKind::FString(_) => TyKind::Primitive(PrimitiveSet::Text),
-            ExprKind::Range(_) => return Ok(None), // TODO
+
+            ExprKind::Range(range) => {
+                let inner_ty = None
+                    .or(range.start.as_ref())
+                    .or(range.end.as_ref())
+                    .map(|e| self.infer_type(e))
+                    .transpose()?
+                    .flatten()
+                    .unwrap_or_else(|| Ty::from(TyKind::Primitive(PrimitiveSet::Int)));
+                let start = TupleField::Single(Some("start".to_string()), Some(inner_ty.clone()));
+                let end = TupleField::Single(Some("start".to_string()), Some(inner_ty));
+                TyKind::Tuple(vec![start, end])
+            }
 
             ExprKind::TransformCall(call) => return self.infer_type_of_transform(call).map(Some),
 
@@ -256,7 +271,30 @@ impl Resolver {
                 TyKind::Array(Box::new(items_ty))
             }
 
-            _ => return Ok(None),
+            ExprKind::Func(func) => TyKind::Function(Some(TyFunc {
+                args: func
+                    .params
+                    .iter()
+                    .skip(func.args.len())
+                    .map(|a| a.ty.as_ref().map(|x| x.as_ty().cloned().unwrap()))
+                    .collect(),
+                return_ty: Box::new(func.return_ty.as_ref().map(|x| x.as_ty().cloned().unwrap())),
+            })),
+            ExprKind::Case(cases) => {
+                let mut variants = Vec::new();
+                for case in cases {
+                    let ty = self.infer_type(&case.value)?;
+                    if let Some(ty) = ty {
+                        variants.push((None, ty));
+                    }
+                }
+                TyKind::Union(variants)
+            }
+            ExprKind::Type(_) => TyKind::Set,
+
+            ExprKind::Param(_) | ExprKind::Internal(_) | ExprKind::RqOperator { .. } => {
+                return Ok(None)
+            }
         };
 
         lineage = lineage.or(expr.id);
@@ -323,7 +361,7 @@ impl Resolver {
         };
         if !expected_is_above {
             fn display_ty(ty: &Ty) -> String {
-                if ty.is_tuple() {
+                if ty.name.is_none() && ty.is_tuple() {
                     "a tuple".to_string()
                 } else {
                     format!("type `{ty}`")

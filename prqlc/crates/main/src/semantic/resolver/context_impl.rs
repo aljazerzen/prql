@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use prqlc_ast::expr::Ident;
 
-use crate::ir::pl::{Annotation, Expr, ExprKind, TupleField};
+use crate::ir::pl::{Annotation, Expr, ExprKind, TupleField, Ty};
 use crate::semantic::context::{Decl, DeclKind, TableDecl, TableExpr};
 use crate::semantic::{
     Context, Module, NS_DEFAULT_DB, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS,
@@ -30,7 +30,7 @@ impl Context {
             // we cannot provide type annotations correctly.
             // Here we are adding-in these annotations when they are defined in std module.
             if ident.path == [NS_STD] && ident.name == "scalar" {
-                let val = decl.as_expr().unwrap().kind.as_type().unwrap().clone();
+                let scalar_ty = decl.as_expr().unwrap().kind.as_type().unwrap().clone();
 
                 let default_db_infer = Ident::from_path(vec![NS_DEFAULT_DB, NS_INFER]);
                 let infer = self.root_mod.get_mut(&default_db_infer).unwrap();
@@ -39,7 +39,7 @@ impl Context {
                 let infer_ty = infer_table.ty.as_mut().unwrap();
                 let infer_field = infer_ty.as_relation_mut().unwrap().get_mut(0).unwrap();
                 let (ty, _) = infer_field.as_all_mut().unwrap();
-                *ty = Some(val);
+                *ty = Some(scalar_ty);
             }
         }
 
@@ -51,6 +51,12 @@ impl Context {
         };
         self.root_mod.insert(ident, decl).unwrap();
         Ok(())
+    }
+
+    pub(super) fn find_std_type(&self, name: &str) -> Ty {
+        let ident = Ident::from_path(vec![NS_STD, name]);
+        let decl = self.root_mod.get(&ident).unwrap().kind.as_expr().unwrap();
+        decl.kind.as_type().unwrap().clone()
     }
 
     pub(super) fn prepare_expr_decl(&mut self, value: Box<Expr>) -> DeclKind {

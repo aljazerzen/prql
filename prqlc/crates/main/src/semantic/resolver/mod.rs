@@ -423,6 +423,10 @@ impl PlFold for Resolver {
 
         if r.ty.is_none() {
             r.ty = self.infer_type(&r)?;
+
+            if r.ty.is_none() {
+                panic!("cannot infer type of: {:?}", r);
+            }
         }
         if let Some(ty) = &mut r.ty {
             if let Some(alias) = r.alias.clone() {
@@ -914,23 +918,7 @@ fn extract_partial_application(mut func: Func, position: usize) -> Func {
 }
 
 fn expr_of_func(func: Func, span: Option<Span>) -> Expr {
-    let ty = TyFunc {
-        args: func
-            .params
-            .iter()
-            .skip(func.args.len())
-            .map(|a| a.ty.as_ref().map(|x| x.as_ty().cloned().unwrap()))
-            .collect(),
-        return_ty: Box::new(func.return_ty.as_ref().map(|x| x.as_ty().cloned().unwrap())),
-    };
-
     Expr {
-        ty: Some(Ty {
-            kind: TyKind::Function(Some(ty)),
-            name: None,
-            lineage: None,
-            instance_of: None,
-        }),
         span,
         ..Expr::new(ExprKind::Func(Box::new(func)))
     }
