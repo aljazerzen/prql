@@ -16,23 +16,62 @@ fn test_expr_ast_code_matches() {
     @@ .. @@
     -    Pipeline(Pipeline),
     @@ .. @@
+    +    /// Container type with a static number of fields.
+    +    /// Fields don't have to have same type.
+    @@ .. @@
+    +    /// Container type with a dynamic number of items.
+    +    /// All items must have same type.
+    @@ .. @@
+    -    Range(Range),
     -    Binary(BinaryExpr),
     -    Unary(UnaryExpr),
+    +
     @@ .. @@
     -}
-    -
+    @@ .. @@
     -#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     -pub struct BinaryExpr {
     -    pub left: Box<Expr>,
     -    pub op: BinOp,
     -    pub right: Box<Expr>,
+    -}
+    +    /// Tuple fields, compounded together into an Expr, except actually being a tuple.
+    +    /// Syntactically, this would be `a, b, c` (a tuple without braces).
+    +    ///
+    +    /// Can only be used inside a tuple, where it will be evaluated to fields of that tuple.
+    +    ///
+    +    /// Example:
+    +    /// ```yaml
+    +    /// Tuple:
+    +    /// - a
+    +    /// - TupleFields:
+    +    ///   - b
+    +    ///   - c
+    +    /// - d
+    +    /// ```
+    +    /// ... would be equivalent to:
+    +    /// ```yaml
+    +    /// Tuple:
+    +    /// - a
+    +    /// - b
+    +    /// - c
+    +    /// - d
+    +    /// ```
+    +    TupleFields(Vec<Expr>),
     @@ .. @@
     -#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     -pub struct UnaryExpr {
     -    pub op: UnOp,
     -    pub expr: Box<Expr>,
-    -}
-    -
+    +    /// An indirection (field access), but instead of selecting mentioned fields,
+    +    /// selecting all unmentioned fields and as TupleFields.
+    +    TupleExclude {
+    +        expr: Box<Expr>,
+    +
+    +        /// Set of relative field identifiers that should be excluded.
+    +        /// Relative to the expr.
+    +        exclude: HashSet<Ident>,
+    +    },
     @@ .. @@
     -    pub return_ty: Option<Box<Expr>>,
     +    pub return_ty: Option<TyOrExpr>,

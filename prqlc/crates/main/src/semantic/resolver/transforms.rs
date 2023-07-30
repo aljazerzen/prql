@@ -8,6 +8,7 @@ use std::iter::zip;
 use crate::ir::generic::{SortDirection, WindowKind};
 use crate::ir::pl::PlFold;
 use crate::ir::pl::*;
+use crate::semantic::ast_expand::try_restrict_range;
 use crate::semantic::write_pl;
 use crate::{Error, Reason, WithErrorInfo};
 
@@ -77,19 +78,22 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         "take" => {
             let [expr, tbl] = unpack::<2>(closure);
 
-            let range = match expr.kind {
-                ExprKind::Literal(Literal::Integer(n)) => range_from_ints(None, Some(n)),
-                ExprKind::Range(range) => range,
-                _ => {
-                    return Err(Error::new(Reason::Expected {
-                        who: Some("`take`".to_string()),
-                        expected: "int or range".to_string(),
-                        found: write_pl(expr.clone()),
-                    })
-                    // Possibly this should refer to the item after the `take` where
-                    // one exists?
-                    .with_span(expr.span)
-                    .into());
+            let range = if let ExprKind::Literal(Literal::Integer(n)) = expr.kind {
+                range_from_ints(None, Some(n))
+            } else {
+                match try_restrict_range(expr) {
+                    Ok(range) => range,
+                    Err(expr) => {
+                        return Err(Error::new(Reason::Expected {
+                            who: Some("`take`".to_string()),
+                            expected: "int or range".to_string(),
+                            found: write_pl(expr.clone()),
+                        })
+                        // Possibly this should refer to the item after the `take` where
+                        // one exists?
+                        .with_span(expr.span)
+                        .into());
+                    }
                 }
             };
 
@@ -159,9 +163,21 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
                 })?
             };
 
-            let rows = rows.try_cast(|r| r.into_range(), Some("parameter `rows`"), "a range")?;
+            let rows = try_restrict_range(rows).map_err(|e| {
+                Error::new(Reason::Expected {
+                    who: Some("parameter `rows`".to_string()),
+                    expected: "a range".to_string(),
+                    found: write_pl(e),
+                })
+            })?;
 
-            let range = range.try_cast(|r| r.into_range(), Some("parameter `range`"), "a range")?;
+            let range = try_restrict_range(range).map_err(|e| {
+                Error::new(Reason::Expected {
+                    who: Some("parameter `range`".to_string()),
+                    expected: "a range".to_string(),
+                    found: write_pl(e),
+                })
+            })?;
 
             let (kind, range) = if expanding {
                 (WindowKind::Rows, range_from_ints(None, Some(0)))
@@ -205,8 +221,8 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
 
             let [pattern, value] = unpack::<2>(closure);
 
-            match pattern.kind {
-                ExprKind::Range(Range { start, end }) => {
+            let pattern = match try_restrict_range(pattern) {
+                Ok(Range { start, end }) => {
                     let start = start.map(|s| new_binop(value.clone(), &["std", "gte"], *s));
                     let end = end.map(|end| new_binop(value, &["std", "lte"], *end));
 
@@ -215,13 +231,9 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
                         res.unwrap_or_else(|| Expr::new(ExprKind::Literal(Literal::Boolean(true))));
                     return Ok(res);
                 }
-                ExprKind::Tuple(_) => {
-                    // TODO: should translate into `value IN (...)`
-                    //   but RQ currently does not support sub queries or
-                    //   even expressions that evaluate to a tuple.
-                }
-                _ => {}
-            }
+                Err(expr) => expr,
+            };
+
             return Err(Error::new(Reason::Expected {
                 who: Some("std.in".to_string()),
                 expected: "a pattern".to_string(),

@@ -54,7 +54,7 @@ pub enum ExprKind {
     /// Container type with a dynamic number of items.
     /// All items must have same type.
     Array(Vec<Expr>),
-    Range(Range),
+
     FuncCall(FuncCall),
     Func(Box<Func>),
     TransformCall(TransformCall),

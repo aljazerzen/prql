@@ -80,7 +80,6 @@ pub fn fold_expr_kind<T: ?Sized + PlFold>(fold: &mut T, expr_kind: ExprKind) -> 
             exclude,
         },
 
-        Range(range) => Range(fold_range(fold, range)?),
         SString(items) => SString(
             items
                 .into_iter()

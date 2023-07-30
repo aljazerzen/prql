@@ -56,6 +56,9 @@ type array = [any]
 type scalar = int || float || bool || text || date || time || timestamp || null
 type tuple = {any..}
 
+## Range
+type range = {start = scalar, end = scalar}
+
 ## Relation (an array of tuples)
 type relation = [tuple]
 

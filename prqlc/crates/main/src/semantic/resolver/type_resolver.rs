@@ -4,6 +4,7 @@ use anyhow::Result;
 use itertools::Itertools;
 
 use crate::ir::pl::*;
+use crate::semantic::ast_expand::try_restrict_range;
 use crate::semantic::write_pl;
 use crate::{Error, Reason, WithErrorInfo};
 
@@ -30,32 +31,32 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
         ExprKind::Literal(lit) => Ty::new(TyKind::Singleton(lit)),
 
         // tuples
-        ExprKind::Tuple(mut elements) => {
+        ExprKind::Tuple(elements) => {
             let mut set_elements = Vec::with_capacity(elements.len());
 
-            // special case: {x..}
-            if elements.len() == 1 {
-                let only = elements.remove(0);
-                if let ExprKind::Range(Range { start, end: None }) = only.kind {
-                    let inner = match start {
-                        Some(x) => Some(coerce_to_type(resolver, *x)?),
-                        None => None,
-                    };
-
-                    set_elements.push(TupleField::All {
-                        ty: inner,
-                        exclude: HashSet::new(),
-                    })
-                } else {
-                    elements.push(only);
-                }
-            }
-
             for e in elements {
-                let (name, ty) = coerce_to_aliased_type(resolver, e)?;
-                let ty = Some(ty);
+                match try_restrict_range(e) {
+                    // special case: {x..}
+                    Ok(Range { start, .. }) => {
+                        let inner = match start {
+                            Some(x) => Some(coerce_to_type(resolver, *x)?),
+                            None => None,
+                        };
 
-                set_elements.push(TupleField::Single(name, ty));
+                        set_elements.push(TupleField::All {
+                            ty: inner,
+                            exclude: HashSet::new(),
+                        })
+                    }
+
+                    // base: case
+                    Err(e) => {
+                        let (name, ty) = coerce_to_aliased_type(resolver, e)?;
+                        let ty = Some(ty);
+
+                        set_elements.push(TupleField::Single(name, ty));
+                    }
+                }
             }
 
             Ty::new(TyKind::Tuple(set_elements))
@@ -145,23 +146,10 @@ impl Resolver {
             ExprKind::FuncCall(_) => {
                 // function calls should be resolved to [ExprKind::Func] or evaluated away.
                 unreachable!()
-            },
+            }
 
             ExprKind::SString(_) => return Ok(Some(self.context.find_std_type("scalar"))),
             ExprKind::FString(_) => TyKind::Primitive(PrimitiveSet::Text),
-
-            ExprKind::Range(range) => {
-                let inner_ty = None
-                    .or(range.start.as_ref())
-                    .or(range.end.as_ref())
-                    .map(|e| self.infer_type(e))
-                    .transpose()?
-                    .flatten()
-                    .unwrap_or_else(|| Ty::from(TyKind::Primitive(PrimitiveSet::Int)));
-                let start = TupleField::Single(Some("start".to_string()), Some(inner_ty.clone()));
-                let end = TupleField::Single(Some("start".to_string()), Some(inner_ty));
-                TyKind::Tuple(vec![start, end])
-            }
 
             ExprKind::TransformCall(call) => return self.infer_type_of_transform(call).map(Some),
 
