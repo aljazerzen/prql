@@ -27,7 +27,7 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
         ExprKind::Type(set_expr) => set_expr,
 
         // singletons
-        ExprKind::Literal(lit) => Ty::from(TyKind::Singleton(lit)),
+        ExprKind::Literal(lit) => Ty::new(TyKind::Singleton(lit)),
 
         // tuples
         ExprKind::Tuple(mut elements) => {
@@ -58,7 +58,7 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
                 set_elements.push(TupleField::Single(name, ty));
             }
 
-            Ty::from(TyKind::Tuple(set_elements))
+            Ty::new(TyKind::Tuple(set_elements))
         }
 
         // arrays
@@ -72,7 +72,7 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
             let items_type = elements.into_iter().next().unwrap();
             let (_, items_type) = coerce_to_aliased_type(resolver, items_type)?;
 
-            Ty::from(TyKind::Array(Box::new(items_type)))
+            Ty::new(TyKind::Array(Box::new(items_type)))
         }
 
         // unions
@@ -94,18 +94,18 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
                 options.push((right.name.clone(), right));
             }
 
-            Ty::from(TyKind::Union(options))
+            Ty::new(TyKind::Union(options))
         }
 
         // functions
-        ExprKind::Func(func) => Ty::from(TyKind::Function(Some(TyFunc {
+        ExprKind::Func(func) => Ty::new(TyFunc {
             args: func
                 .params
                 .into_iter()
                 .map(|p| p.ty.map(|t| t.into_ty().unwrap()))
                 .collect_vec(),
             return_ty: Box::new(resolver.fold_type_expr(Some(func.body))?),
-        }))),
+        }),
 
         _ => {
             return Err(Error::new_simple(format!(
@@ -302,7 +302,7 @@ impl Resolver {
         Ok(Some(Ty {
             lineage,
             instance_of,
-            ..Ty::from(kind)
+            ..Ty::new(kind)
         }))
     }
 

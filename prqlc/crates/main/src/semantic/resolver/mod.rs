@@ -182,7 +182,7 @@ impl Resolver {
         });
 
         // wrap with the tuple name
-        let mut tuple = Ty::from(TyKind::Tuple(fields));
+        let mut tuple = Ty::new(TyKind::Tuple(fields));
         tuple.lineage = Some(input_id);
         tuple.instance_of = Some(table_fq.clone());
         let fields = vec![TupleField::Single(Some(input_name), Some(tuple))];
@@ -949,23 +949,11 @@ fn get_stdlib_decl(name: &str) -> Option<ExprKind> {
         "date" => PrimitiveSet::Date,
         "time" => PrimitiveSet::Time,
         "timestamp" => PrimitiveSet::Timestamp,
-        "func" => {
-            return Some(ExprKind::Type(Ty {
-                kind: TyKind::Function(None),
-                name: None,
-                lineage: None,
-                instance_of: None,
-            }))
-        }
-        "any" => {
-            return Some(ExprKind::Type(Ty {
-                kind: TyKind::Any,
-                name: None,
-            }))
-        }
+        "func" => return Some(ExprKind::Type(Ty::new(TyKind::Function(None)))),
+        "any" => return Some(ExprKind::Type(Ty::new(TyKind::Any))),
         _ => return None,
     };
-    Some(ExprKind::Type(Ty::from(TyKind::Primitive(set))))
+    Some(ExprKind::Type(Ty::new(set)))
 }
 
 #[cfg(test)]

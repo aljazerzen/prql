@@ -447,7 +447,7 @@ fn fold_by_simulating_eval(
     let param_id = resolver.id.gen();
     let param_ty = Ty {
         lineage: Some(param_id),
-        ..Ty::from(TyKind::Union(vec![]))
+        ..Ty::new(TyKind::Union(vec![]))
     };
 
     // resolver will not resolve a function call if any arguments are missing
@@ -518,7 +518,7 @@ impl Resolver {
         Ok(match transform.kind.as_ref() {
             Select { tuple } => {
                 let tuple = tuple.ty.clone().unwrap();
-                Ty::from(TyKind::Array(Box::new(tuple)))
+                Ty::new(TyKind::Array(Box::new(tuple)))
             }
             Derive { tuple } => {
                 let prev = ty_relation_or_default(&transform.input);
@@ -526,12 +526,12 @@ impl Resolver {
                 let new = tuple.ty.as_ref().unwrap().kind.as_tuple().unwrap();
 
                 let combined = self.concat_tuples(prev, new)?;
-                Ty::from(TyKind::Array(Box::new(combined)))
+                Ty::new(TyKind::Array(Box::new(combined)))
             }
             Aggregate { tuple } => {
                 let tuple = tuple.ty.clone().unwrap();
 
-                Ty::from(TyKind::Array(Box::new(tuple)))
+                Ty::new(TyKind::Array(Box::new(tuple)))
             }
             Group { pipeline, by, .. } => {
                 // pipeline's body is resolved, just use its type
@@ -552,7 +552,7 @@ impl Resolver {
                         log::debug!(".. group by {by:?}");
 
                         let combined = self.concat_tuples(by, fields)?;
-                        ty = Ty::from(TyKind::Array(Box::new(combined)))
+                        ty = Ty::new(TyKind::Array(Box::new(combined)))
                     }
                 }
 
@@ -584,11 +584,11 @@ impl Resolver {
     fn concat_tuples(&mut self, a: &[TupleField], b: &[TupleField]) -> Result<Ty> {
         let new = Expr::new(ExprKind::Tuple(vec![
             Expr {
-                ty: Some(Ty::from(TyKind::Tuple(a.to_vec()))),
+                ty: Some(Ty::new(TyKind::Tuple(a.to_vec()))),
                 ..Expr::new(ExprKind::TupleFields(vec![]))
             },
             Expr {
-                ty: Some(Ty::from(TyKind::Tuple(b.to_vec()))),
+                ty: Some(Ty::new(TyKind::Tuple(b.to_vec()))),
                 ..Expr::new(ExprKind::TupleFields(vec![]))
             },
         ]));

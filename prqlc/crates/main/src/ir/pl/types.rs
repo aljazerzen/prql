@@ -94,9 +94,18 @@ pub struct TyFunc {
 }
 
 impl Ty {
+    pub fn new<K: Into<TyKind>>(kind: K) -> Ty {
+        Ty {
+            kind: kind.into(),
+            name: None,
+            lineage: None,
+            instance_of: None,
+        }
+    }
+
     pub fn relation(tuple_fields: Vec<TupleField>) -> Self {
-        let tuple = Ty::from(TyKind::Tuple(tuple_fields));
-        Ty::from(TyKind::Array(Box::new(tuple)))
+        let tuple = Ty::new(TyKind::Tuple(tuple_fields));
+        Ty::new(TyKind::Array(Box::new(tuple)))
     }
 
     pub fn as_relation(&self) -> Option<&Vec<TupleField>> {
@@ -209,7 +218,7 @@ impl Ty {
             let ty = Ty {
                 lineage: self.lineage,
                 instance_of: self.instance_of.clone(),
-                ..Ty::from(TyKind::Tuple(inner_fields))
+                ..Ty::new(TyKind::Tuple(inner_fields))
             };
             fields.push(TupleField::Single(Some(alias), Some(ty)));
         }
@@ -259,17 +268,6 @@ impl TupleField {
     }
 }
 
-impl From<TyKind> for Ty {
-    fn from(kind: TyKind) -> Ty {
-        Ty {
-            kind,
-            name: None,
-            lineage: None,
-            instance_of: None,
-        }
-    }
-}
-
 fn is_not_super_type_of(sup: &Option<Ty>, sub: &Option<Ty>) -> bool {
     if let Some(sub_ret) = sub {
         if let Some(sup_ret) = sup {
@@ -284,5 +282,17 @@ fn is_not_super_type_of(sup: &Option<Ty>, sub: &Option<Ty>) -> bool {
 impl std::fmt::Debug for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self, f)
+    }
+}
+
+impl From<PrimitiveSet> for TyKind {
+    fn from(value: PrimitiveSet) -> Self {
+        TyKind::Primitive(value)
+    }
+}
+
+impl From<TyFunc> for TyKind {
+    fn from(value: TyFunc) -> Self {
+        TyKind::Function(Some(value))
     }
 }
