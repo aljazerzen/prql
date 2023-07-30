@@ -1028,6 +1028,12 @@ fn get_stdlib_decl(name: &str) -> Option<ExprKind> {
                 name: None,
             }))
         }
+        "any" => {
+            return Some(ExprKind::Type(Ty {
+                kind: TyKind::Any,
+                name: None,
+            }))
+        }
         _ => return None,
     };
     Some(ExprKind::Type(Ty {
