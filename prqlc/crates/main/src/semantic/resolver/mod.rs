@@ -151,7 +151,7 @@ impl Resolver {
             let expected_ty = self.fold_type_expr(def.ty_expr)?;
             if expected_ty.is_some() {
                 let who = || Some(stmt_name.clone());
-                self.validate_type(&mut def.value, expected_ty.as_ref(), &who)?;
+                self.validate_expr_type(&mut def.value, expected_ty.as_ref(), &who)?;
             }
 
             let decl = self.context.prepare_expr_decl(def.value);
@@ -399,7 +399,7 @@ impl PlFold for Resolver {
                     if expr.ty.is_some() {
                         if expected_ty.is_some() {
                             let who = || Some("array".to_string());
-                            self.validate_type(expr, expected_ty, &who)?;
+                            self.validate_expr_type(expr, expected_ty, &who)?;
                         }
                         expected_ty = expr.ty.as_ref();
                     }
@@ -794,7 +794,7 @@ impl Resolver {
                     .map(|n| format!("function {n}, param `{}`", param.name))
             };
             let ty = param.ty.as_ref().map(|t| t.as_ty().unwrap());
-            self.validate_type(&mut arg, ty, &who)?;
+            self.validate_expr_type(&mut arg, ty, &who)?;
         }
 
         Ok(Ok(arg))
@@ -1141,14 +1141,19 @@ pub(super) mod test {
                     - ~
                     - kind:
                         Primitive: Int
+                      lineage: 180
                 - Single:
                     - b
                     - kind:
                         Primitive: Int
+                      lineage: 181
                 - Single:
                     - a
                     - kind:
                         Primitive: Int
+                      lineage: 182
+            lineage: 179
+        lineage: 178
         "###);
     }
 
@@ -1168,78 +1173,15 @@ pub(super) mod test {
               Tuple:
                 - Single:
                     - track_id
-                    - kind:
-                        Union:
-                          - - int
-                            - kind:
-                                Primitive: Int
-                              name: int
-                          - - float
-                            - kind:
-                                Primitive: Float
-                              name: float
-                          - - bool
-                            - kind:
-                                Primitive: Bool
-                              name: bool
-                          - - text
-                            - kind:
-                                Primitive: Text
-                              name: text
-                          - - date
-                            - kind:
-                                Primitive: Date
-                              name: date
-                          - - time
-                            - kind:
-                                Primitive: Time
-                              name: time
-                          - - timestamp
-                            - kind:
-                                Primitive: Timestamp
-                              name: timestamp
-                          - - ~
-                            - kind:
-                                Singleton: "Null"
-                      name: scalar
-                      lineage: 193
+                    - kind: Any
+                      lineage: 203
+                      infer: true
                 - Single:
                     - price
-                    - kind:
-                        Union:
-                          - - int
-                            - kind:
-                                Primitive: Int
-                              name: int
-                          - - float
-                            - kind:
-                                Primitive: Float
-                              name: float
-                          - - bool
-                            - kind:
-                                Primitive: Bool
-                              name: bool
-                          - - text
-                            - kind:
-                                Primitive: Text
-                              name: text
-                          - - date
-                            - kind:
-                                Primitive: Date
-                              name: date
-                          - - time
-                            - kind:
-                                Primitive: Time
-                              name: time
-                          - - timestamp
-                            - kind:
-                                Primitive: Timestamp
-                              name: timestamp
-                          - - ~
-                            - kind:
-                                Singleton: "Null"
-                      name: scalar
-                      lineage: 193
+                    - kind: Any
+                      lineage: 203
+                      infer: true
+            lineage: 210
         "###);
 
         assert_yaml_snapshot!(resolve_ty(
@@ -1254,18 +1196,21 @@ pub(super) mod test {
           Array:
             kind:
               Tuple:
-                - Single:
-                    - ~
-                    - kind:
-                        Primitive: Int
-                - Single:
-                    - b
-                    - kind:
-                        Primitive: Int
-                - Single:
-                    - a
-                    - kind:
-                        Primitive: Int
+                - All:
+                    ty:
+                      kind: Any
+                      lineage: 203
+                      instance_of:
+                        - default_db
+                        - tracks
+                      infer: true
+                    exclude:
+                      - - title
+                      - - composer
+            lineage: 203
+            instance_of:
+              - default_db
+              - tracks
         "###);
     }
 }

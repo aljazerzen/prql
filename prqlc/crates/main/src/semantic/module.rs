@@ -64,14 +64,19 @@ impl Module {
     }
 
     pub fn new_database() -> Module {
+        let mut col_ty = Ty::new(TyKind::Any);
+        col_ty.infer = true;
+
+        let table_ty = Ty::relation(vec![TupleField::All {
+            ty: Some(col_ty),
+            exclude: HashSet::new(),
+        }]);
+
         let names = HashMap::from([
             (
                 NS_INFER.to_string(),
                 Decl::from(DeclKind::Infer(Box::new(DeclKind::TableDecl(TableDecl {
-                    ty: Some(Ty::relation(vec![TupleField::All {
-                        ty: None,
-                        exclude: HashSet::new(),
-                    }])),
+                    ty: Some(table_ty),
                     expr: TableExpr::LocalTable,
                 })))),
             ),
@@ -241,7 +246,10 @@ impl Module {
 
                     let self_decl = Decl {
                         declared_at: None,
-                        kind: DeclKind::InstanceOf { table_fq: instance_of.clone(), lineage },
+                        kind: DeclKind::InstanceOf {
+                            table_fq: instance_of.clone(),
+                            lineage,
+                        },
                         ..Default::default()
                     };
                     sub_mod.names.insert(NS_SELF.to_string(), self_decl);

@@ -295,7 +295,7 @@ impl Resolver {
     }
 
     /// Validates that found node has expected type. Returns assumed type of the node.
-    pub fn validate_type<F>(
+    pub fn validate_expr_type<F>(
         &mut self,
         found: &mut Expr,
         expected: Option<&Ty>,
@@ -304,15 +304,12 @@ impl Resolver {
     where
         F: Fn() -> Option<String>,
     {
-        let found_ty = found.ty.clone();
-
-        // infer
-        let Some(expected) = expected else {
+        if expected.is_none() {
             // expected is none: there is no validation to be done
             return Ok(());
         };
 
-        let Some(found_ty) = found_ty else {
+        let Some(found_ty) = &mut found.ty else {
             // found is none: infer from expected
 
             // TODO: what's up with this?
@@ -329,108 +326,151 @@ impl Resolver {
             // }
 
             // base case: infer expected type
-            found.ty = Some(expected.clone());
+            found.ty = expected.cloned();
 
             return Ok(());
         };
 
-        let expected_is_above = match &mut found.kind {
-            // special case of container type: tuple
-            ExprKind::Tuple(found_fields) => {
-                let ok = self.validate_tuple_type(found_fields, expected, who)?;
-                if ok {
-                    return Ok(());
-                }
-                false
-            }
-
-            // base case: compare types
-            _ => expected.is_super_type_of(&found_ty),
-        };
-        if !expected_is_above {
-            fn display_ty(ty: &Ty) -> String {
-                if ty.name.is_none() && ty.is_tuple() {
-                    "a tuple".to_string()
-                } else {
-                    format!("type `{ty}`")
-                }
-            }
-
-            let who = who();
-            let is_join = who
-                .as_ref()
-                .map(|x| x.contains("std.join"))
-                .unwrap_or_default();
-
-            let mut e = Err(Error::new(Reason::Expected {
-                who,
-                expected: display_ty(expected),
-                found: display_ty(&found_ty),
-            })
-            .with_span(found.span));
-
-            if found_ty.is_function() && !expected.is_function() {
-                let func_name = found.kind.as_func().and_then(|c| c.name_hint.as_ref());
-                let to_what = func_name
-                    .map(|n| format!("to function {n}"))
-                    .unwrap_or_else(|| "in this function call?".to_string());
-
-                e = e.push_hint(format!("Have you forgotten an argument {to_what}?"));
-            }
-
-            if is_join && found_ty.is_tuple() && !expected.is_tuple() {
-                e = e.push_hint("Try using `(...)` instead of `{...}`");
-            }
-
-            if let Some(expected_name) = &expected.name {
-                let expanded = expected.kind.to_string();
-                e = e.push_hint(format!("Type `{expected_name}` expands to `{expanded}`"));
-            }
-
-            return e;
-        }
-        Ok(())
+        self.validate_type(found_ty, expected, who)
+            .with_span(found.span)
     }
 
-    fn validate_tuple_type<F>(
+    /// Validates that found node has expected type. Returns assumed type of the node.
+    pub fn validate_type<F>(
         &mut self,
-        found_fields: &mut [Expr],
-        expected: &Ty,
+        found: &mut Ty,
+        expected: Option<&Ty>,
         who: &F,
-    ) -> Result<bool, Error>
+    ) -> Result<(), Error>
     where
         F: Fn() -> Option<String>,
     {
-        let Some(expected_fields) = find_potential_tuple_fields(expected) else {
-            return Ok(false);
+        let Some(expected) = expected else {
+            // expected is none: there is no validation to be done
+            return Ok(());
         };
 
-        let mut found = found_fields.iter_mut();
+        let expected_is_above = expected.is_super_type_of(found);
 
-        for expected_field in expected_fields {
-            match expected_field {
-                TupleField::Single(_, expected_kind) => match found.next() {
-                    Some(found_field) => {
-                        self.validate_type(found_field, expected_kind.as_ref(), who)?
-                    }
-                    None => {
-                        return Ok(false);
-                    }
-                },
-                TupleField::All {
-                    ty: expected_wildcard,
-                    ..
-                } => {
-                    for found_field in found {
-                        self.validate_type(found_field, expected_wildcard.as_ref(), who)?;
-                    }
-                    return Ok(true);
+        if expected_is_above {
+            // validation succeeded, return
+            return Ok(());
+        }
+
+        // infer types
+        if found.infer {
+            // This case will happen when variable is for example an `int || timestamp`, but the
+            // expected type is just `int`. If the variable allows it, we infer that the
+            // variable is actually just `int`.
+            let is_found_above = found.is_super_type_of(expected);
+
+            if is_found_above {
+                // This if prevents variables of for example type `int || timestamp` to be inferred
+                // as `text`.
+                let instance_of = found.instance_of.take();
+
+                *found = expected.clone();
+
+                // propagate the inference to table declarations
+                // TODO: could this be unified with [Context::infer_decl]?
+                if let Some(instance_of) = instance_of {
+                    let _decl = self.context.root_mod.get(&instance_of).unwrap();
+
+                    // TODO
                 }
+                return Ok(());
             }
         }
 
-        Ok(found.next().is_none())
+        return Err(compose_type_error(found, expected, who));
     }
+
+    // This is an old attempt to validate tuple types on Expr instead of Ty.
+    // It does not work when the expr is syntactically not Tuple, but has a type of a tuple.
+    // fn validate_tuple_type<F>(
+    //     &mut self,
+    //     found_fields: &mut [Expr],
+    //     expected: &Ty,
+    //     who: &F,
+    // ) -> Result<bool, Error>
+    // where
+    //     F: Fn() -> Option<String>,
+    // {
+    //     let Some(expected_fields) = find_potential_tuple_fields(expected) else {
+    //         return Ok(false);
+    //     };
+
+    //     let mut found = found_fields.iter_mut();
+
+    //     for expected_field in expected_fields {
+    //         match expected_field {
+    //             TupleField::Single(_, expected_kind) => match found.next() {
+    //                 Some(found_field) => {
+    //                     self.validate_type(found_field, expected_kind.as_ref(), who)?
+    //                 }
+    //                 None => {
+    //                     return Ok(false);
+    //                 }
+    //             },
+    //             TupleField::All {
+    //                 ty: expected_wildcard,
+    //                 ..
+    //             } => {
+    //                 for found_field in found {
+    //                     self.validate_type(found_field, expected_wildcard.as_ref(), who)?;
+    //                 }
+    //                 return Ok(true);
+    //             }
+    //         }
+    //     }
+
+    //     Ok(found.next().is_none())
+    // }
+}
+
+fn compose_type_error<F>(found_ty: &mut Ty, expected: &Ty, who: &F) -> Error
+where
+    F: Fn() -> Option<String>,
+{
+    fn display_ty(ty: &Ty) -> String {
+        if ty.name.is_none() && ty.is_tuple() {
+            "a tuple".to_string()
+        } else {
+            format!("type `{ty}`")
+        }
+    }
+
+    let who = who();
+    let is_join = who
+        .as_ref()
+        .map(|x| x.contains("std.join"))
+        .unwrap_or_default();
+
+    let mut e = Error::new(Reason::Expected {
+        who,
+        expected: display_ty(expected),
+        found: display_ty(&found_ty),
+    });
+
+    if found_ty.is_function() && !expected.is_function() {
+        // let func_name = found.kind.as_func().and_then(|c| c.name_hint.as_ref());
+        let func_name = Some("TODO");
+        let to_what = func_name
+            .map(|n| format!("to function {n}"))
+            .unwrap_or_else(|| "in this function call?".to_string());
+
+        e = e.push_hint(format!("Have you forgotten an argument {to_what}?"));
+    }
+
+    if is_join && found_ty.is_tuple() && !expected.is_tuple() {
+        e = e.push_hint("Try using `(...)` instead of `{...}`");
+    }
+
+    if let Some(expected_name) = &expected.name {
+        let expanded = expected.kind.to_string();
+        e = e.push_hint(format!("Type `{expected_name}` expands to `{expanded}`"));
+    }
+    e
 }
 
 #[allow(dead_code)]
@@ -452,17 +492,68 @@ fn too_many_arguments(call: &FuncCall, expected_len: usize, passed_len: usize) -
     }
 }
 
-fn find_potential_tuple_fields(expected: &Ty) -> Option<&Vec<TupleField>> {
-    match &expected.kind {
-        TyKind::Tuple(fields) => Some(fields),
-        TyKind::Union(variants) => {
-            for (_, variant) in variants {
-                if let Some(fields) = find_potential_tuple_fields(variant) {
-                    return Some(fields);
-                }
-            }
-            None
-        }
-        _ => None,
+// fn find_potential_tuple_fields(expected: &Ty) -> Option<&Vec<TupleField>> {
+//     match &expected.kind {
+//         TyKind::Tuple(fields) => Some(fields),
+//         TyKind::Union(variants) => {
+//             for (_, variant) in variants {
+//                 if let Some(fields) = find_potential_tuple_fields(variant) {
+//                     return Some(fields);
+//                 }
+//             }
+//             None
+//         }
+//         _ => None,
+//     }
+// }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn parse_type(source: &str) -> Ty {
+        let source_tree = format!("type x = ({})", source).into();
+        let ast = crate::parser::parse(&source_tree).unwrap();
+
+        let root_mod = crate::semantic::resolve(ast, Default::default()).unwrap();
+
+        let ident = Ident::from_name("x");
+        let decl = &root_mod.root_mod.get(&ident).unwrap().kind;
+
+        decl.as_expr().unwrap().kind.as_type().unwrap().clone()
+    }
+
+    #[test]
+    fn test_is_super_tuples_00() {
+        assert!(parse_type("{any}").is_super_type_of(&parse_type("{int}")));
+        assert!(parse_type("{any..}").is_super_type_of(&parse_type("{int..}")));
+    }
+
+    #[test]
+    fn test_is_super_tuples_01() {
+        assert!(parse_type("{any}").is_super_type_of(&parse_type("{(int || text)}")));
+        assert!(parse_type("{any..}").is_super_type_of(&parse_type("{(int || text)..}")));
+    }
+
+    #[test]
+    fn test_is_super_tuples_02() {
+        assert!(parse_type("{(int || text)}").is_super_type_of(&parse_type("{int}")));
+        assert!(parse_type("{(int || text)..}").is_super_type_of(&parse_type("{int..}")));
+    }
+
+    #[test]
+    fn test_is_super_tuples_03() {
+        assert!(parse_type("{int..}").is_super_type_of(&parse_type("{}")));
+        assert!(parse_type("{int..}").is_super_type_of(&parse_type("{int}")));
+        assert!(parse_type("{int..}").is_super_type_of(&parse_type("{int, int}")));
+        assert!(parse_type("{int..}").is_super_type_of(&parse_type("{int, int, int}")));
+    }
+
+    #[test]
+    fn test_is_super_tuples_04() {
+        assert!(parse_type("{text, int..}").is_super_type_of(&parse_type("{text, }")));
+        assert!(parse_type("{text, int..}").is_super_type_of(&parse_type("{text, int}")));
+        assert!(parse_type("{text, int..}").is_super_type_of(&parse_type("{text, int, int}")));
+        assert!(parse_type("{text, int..}").is_super_type_of(&parse_type("{text, int, int, int}")));
     }
 }

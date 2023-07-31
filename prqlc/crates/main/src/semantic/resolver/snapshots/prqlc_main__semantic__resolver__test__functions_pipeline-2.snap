@@ -10,7 +10,7 @@ expression: "resolve_derive(r#\"\n            let plus_one = x -> x + 1\n       
         ty:
           kind:
             Primitive: Int
-          name: ~
+          lineage: 209
       - RqOperator:
           name: std.add
           args:
@@ -38,13 +38,12 @@ expression: "resolve_derive(r#\"\n            let plus_one = x -> x + 1\n       
                       - kind:
                           Primitive: Float
                         name: float
-                name: ~
             - Literal:
                 Integer: 1
               ty:
                 kind:
                   Primitive: Int
-                name: ~
+                lineage: 328
         ty:
           kind:
             Union:
@@ -64,7 +63,6 @@ expression: "resolve_derive(r#\"\n            let plus_one = x -> x + 1\n       
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
   alias: b
   ty:
     kind:
@@ -85,5 +83,4 @@ expression: "resolve_derive(r#\"\n            let plus_one = x -> x + 1\n       
           - kind:
               Primitive: Date
             name: date
-    name: ~
 

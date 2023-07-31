@@ -28,7 +28,6 @@ expression: "resolve_derive(r#\"\n            from employees\n            derive
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
       - Ident:
           - this
           - employees
@@ -52,7 +51,6 @@ expression: "resolve_derive(r#\"\n            from employees\n            derive
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
   alias: gross_salary
   ty:
     kind:
@@ -73,7 +71,6 @@ expression: "resolve_derive(r#\"\n            from employees\n            derive
           - kind:
               Primitive: Date
             name: date
-    name: ~
 - RqOperator:
     name: std.add
     args:
@@ -99,7 +96,6 @@ expression: "resolve_derive(r#\"\n            from employees\n            derive
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
       - Ident:
           - this
           - employees
@@ -123,7 +119,6 @@ expression: "resolve_derive(r#\"\n            from employees\n            derive
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
   alias: gross_cost
   ty:
     kind:
@@ -144,5 +139,4 @@ expression: "resolve_derive(r#\"\n            from employees\n            derive
           - kind:
               Primitive: Date
             name: date
-    name: ~
 

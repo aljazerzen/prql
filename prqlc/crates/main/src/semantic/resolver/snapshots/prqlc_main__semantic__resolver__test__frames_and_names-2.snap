@@ -1,23 +1,35 @@
 ---
 source: prqlc/crates/main/src/semantic/resolver/mod.rs
-expression: "resolve_lineage(r#\"\n            from table_1\n            join customers (==customer_no)\n            \"#).unwrap()"
+expression: "resolve_ty(r#\"\n            from table_1\n            join customers (==customer_no)\n            \"#).unwrap()"
 ---
-columns:
-  - All:
-      input_name: table_1
-      except: []
-  - All:
-      input_name: customers
-      except: []
-inputs:
-  - id: 188
-    name: table_1
-    table:
-      - default_db
-      - table_1
-  - id: 181
-    name: customers
-    table:
-      - default_db
-      - customers
+kind:
+  Array:
+    kind:
+      Tuple:
+        - Single:
+            - table_1
+            - kind:
+                Tuple:
+                  - All:
+                      ty:
+                        kind: Any
+                        infer: true
+                      exclude: []
+              lineage: 196
+              instance_of:
+                - default_db
+                - table_1
+        - Single:
+            - customers
+            - kind:
+                Tuple:
+                  - All:
+                      ty:
+                        kind: Any
+                        infer: true
+                      exclude: []
+              lineage: 189
+              instance_of:
+                - default_db
+                - customers
 

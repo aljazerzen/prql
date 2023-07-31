@@ -28,7 +28,6 @@ expression: "resolve_derive(r#\"\n            let subtract = a b -> a - b\n\n   
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
       - Ident:
           - this
           - employees
@@ -52,7 +51,6 @@ expression: "resolve_derive(r#\"\n            let subtract = a b -> a - b\n\n   
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
   alias: net_salary
   ty:
     kind:
@@ -73,5 +71,4 @@ expression: "resolve_derive(r#\"\n            let subtract = a b -> a - b\n\n   
           - kind:
               Primitive: Date
             name: date
-    name: ~
 

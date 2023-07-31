@@ -28,13 +28,12 @@ expression: "resolve_derive(r#\"\n            let add_one = x to:1 -> x + to\n\n
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
       - Literal:
           Integer: 3
         ty:
           kind:
             Primitive: Int
-          name: ~
+          lineage: 207
   alias: added
   ty:
     kind:
@@ -55,7 +54,6 @@ expression: "resolve_derive(r#\"\n            let add_one = x to:1 -> x + to\n\n
           - kind:
               Primitive: Date
             name: date
-    name: ~
 - RqOperator:
     name: std.add
     args:
@@ -82,13 +80,12 @@ expression: "resolve_derive(r#\"\n            let add_one = x to:1 -> x + to\n\n
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
       - Literal:
           Integer: 1
         ty:
           kind:
             Primitive: Int
-          name: ~
+          lineage: 311
   alias: added_default
   ty:
     kind:
@@ -109,5 +106,4 @@ expression: "resolve_derive(r#\"\n            let add_one = x to:1 -> x + to\n\n
           - kind:
               Primitive: Date
             name: date
-    name: ~
 

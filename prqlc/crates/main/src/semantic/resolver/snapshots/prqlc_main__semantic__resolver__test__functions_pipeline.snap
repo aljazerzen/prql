@@ -27,5 +27,4 @@ expression: "resolve_derive(r#\"\n            from a\n            derive one = (
           - kind:
               Primitive: Float
             name: float
-    name: ~
 

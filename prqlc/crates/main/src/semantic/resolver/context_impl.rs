@@ -7,9 +7,7 @@ use prqlc_ast::expr::Ident;
 
 use crate::ir::pl::{Annotation, Expr, ExprKind, TupleField, Ty};
 use crate::semantic::context::{Decl, DeclKind, TableDecl, TableExpr};
-use crate::semantic::{
-    Context, Module, NS_DEFAULT_DB, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS,
-};
+use crate::semantic::{Context, Module, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS};
 use crate::{Error, WithErrorInfo};
 
 impl Context {
@@ -23,24 +21,6 @@ impl Context {
         let existing = self.root_mod.get(&ident);
         if existing.is_some() {
             return Err(Error::new_simple(format!("duplicate declarations of {ident}")).into());
-        }
-
-        {
-            // HACK: because we are creating default_db module prior to std,
-            // we cannot provide type annotations correctly.
-            // Here we are adding-in these annotations when they are defined in std module.
-            if ident.path == [NS_STD] && ident.name == "scalar" {
-                let scalar_ty = decl.as_expr().unwrap().kind.as_type().unwrap().clone();
-
-                let default_db_infer = Ident::from_path(vec![NS_DEFAULT_DB, NS_INFER]);
-                let infer = self.root_mod.get_mut(&default_db_infer).unwrap();
-                let infer_table = infer.kind.as_infer_mut().unwrap();
-                let infer_table = infer_table.as_table_decl_mut().unwrap();
-                let infer_ty = infer_table.ty.as_mut().unwrap();
-                let infer_field = infer_ty.as_relation_mut().unwrap().get_mut(0).unwrap();
-                let (ty, _) = infer_field.as_all_mut().unwrap();
-                *ty = Some(scalar_ty);
-            }
         }
 
         let decl = Decl {

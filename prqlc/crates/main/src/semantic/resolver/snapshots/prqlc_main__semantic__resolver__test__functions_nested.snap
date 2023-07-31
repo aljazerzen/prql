@@ -15,6 +15,10 @@ expression: "resolve_derive(r#\"\n            let lag_day = x -> s\"lag_day_todo
                       - this
                       - a
                       - b
+                    ty:
+                      kind: Any
+                      lineage: 205
+                      infer: true
                   - SString:
                       - String: lag_day_todo(
                       - Expr:
@@ -23,8 +27,47 @@ expression: "resolve_derive(r#\"\n            let lag_day = x -> s\"lag_day_todo
                               - this
                               - a
                               - b
+                            ty:
+                              kind: Any
+                              lineage: 205
+                              infer: true
                           format: ~
                       - String: )
+                    ty:
+                      kind:
+                        Union:
+                          - - int
+                            - kind:
+                                Primitive: Int
+                              name: int
+                          - - float
+                            - kind:
+                                Primitive: Float
+                              name: float
+                          - - bool
+                            - kind:
+                                Primitive: Bool
+                              name: bool
+                          - - text
+                            - kind:
+                                Primitive: Text
+                              name: text
+                          - - date
+                            - kind:
+                                Primitive: Date
+                              name: date
+                          - - time
+                            - kind:
+                                Primitive: Time
+                              name: time
+                          - - timestamp
+                            - kind:
+                                Primitive: Timestamp
+                              name: timestamp
+                          - - ~
+                            - kind:
+                                Singleton: "Null"
+                      name: scalar
               ty:
                 kind:
                   Union:
@@ -36,13 +79,12 @@ expression: "resolve_derive(r#\"\n            let lag_day = x -> s\"lag_day_todo
                       - kind:
                           Primitive: Float
                         name: float
-                name: ~
             - Literal:
                 Integer: 1
               ty:
                 kind:
                   Primitive: Int
-                name: ~
+                lineage: 426
         ty:
           kind:
             Union:
@@ -62,7 +104,6 @@ expression: "resolve_derive(r#\"\n            let lag_day = x -> s\"lag_day_todo
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
       - Ident:
           - this
           - a
@@ -86,7 +127,6 @@ expression: "resolve_derive(r#\"\n            let lag_day = x -> s\"lag_day_todo
                 - kind:
                     Primitive: Date
                   name: date
-          name: ~
   ty:
     kind:
       Union:
@@ -106,5 +146,4 @@ expression: "resolve_derive(r#\"\n            let lag_day = x -> s\"lag_day_todo
           - kind:
               Primitive: Date
             name: date
-    name: ~
 

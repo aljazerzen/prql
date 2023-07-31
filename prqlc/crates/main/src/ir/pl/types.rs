@@ -55,14 +55,19 @@ pub struct Ty {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
-    // Ids of the nodes that are the source for data of this type.
-    // Can point to a table reference or a column expression.
+    /// Ids of the nodes that are the source for data of this type.
+    /// Can point to a table reference or a column expression.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lineage: Option<usize>,
 
-    // Fully-qualified name of table that was instanced to produce this type.
+    /// Fully-qualified name of table that was instanced to produce this type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_of: Option<Ident>,
+
+    /// True iff this type can be restricted.
+    /// The new type must be subtype of the original.
+    #[serde(skip_serializing_if = "is_false", default)]
+    pub infer: bool,
 }
 
 /// Built-in sets.
@@ -100,6 +105,7 @@ impl Ty {
             name: None,
             lineage: None,
             instance_of: None,
+            infer: false,
         }
     }
 
@@ -153,8 +159,6 @@ impl Ty {
 impl TyKind {
     fn is_super_type_of(&self, subset: &TyKind) -> bool {
         match (self, subset) {
-            (TyKind::Any, _) => true,
-            (_, TyKind::Any) => false,
             (TyKind::Primitive(l0), TyKind::Primitive(r0)) => l0 == r0,
 
             (one, TyKind::Union(many)) => many
@@ -164,6 +168,9 @@ impl TyKind {
             (TyKind::Union(many), one) => {
                 many.iter().any(|(_, any)| any.kind.is_super_type_of(one))
             }
+
+            (TyKind::Any, _) => true,
+            (_, TyKind::Any) => false,
 
             (TyKind::Function(None), TyKind::Function(_)) => true,
             (TyKind::Function(Some(_)), TyKind::Function(None)) => true,
@@ -185,12 +192,41 @@ impl TyKind {
 
             (TyKind::Array(sup), TyKind::Array(sub)) => sup.is_super_type_of(sub),
 
-            (TyKind::Tuple(sup_fields), TyKind::Tuple(_)) => {
-                if sup_fields.iter().any(|x| x.is_all()) {
-                    return true;
+            (TyKind::Tuple(sup_fields), TyKind::Tuple(sub_fields)) => {
+                let mut sub_fields = sub_fields.iter();
+
+                for sup_field in sup_fields {
+                    match sup_field {
+                        TupleField::Single(_, sup) => match sub_fields.next() {
+                            Some(TupleField::Single(_, sub)) => {
+                                if is_not_super_type_of(sup, sub) {
+                                    return false;
+                                }
+                            }
+                            Some(TupleField::All { .. }) | None => {
+                                return false;
+                            }
+                        },
+                        TupleField::All { ty: sup, .. } => loop {
+                            match sub_fields.next() {
+                                Some(TupleField::Single(_, sub)) => {
+                                    if is_not_super_type_of(sup, sub) {
+                                        return false;
+                                    }
+                                }
+                                Some(TupleField::All { ty: sub, .. }) => {
+                                    if is_not_super_type_of(sup, sub) {
+                                        return false;
+                                    }
+                                    break;
+                                }
+                                None => break,
+                            }
+                        },
+                    }
                 }
-                // TODO: compare fields one by one
-                false
+
+                sub_fields.next().is_none()
             }
 
             (l, r) => l == r,
@@ -295,4 +331,8 @@ impl From<TyFunc> for TyKind {
     fn from(value: TyFunc) -> Self {
         TyKind::Function(Some(value))
     }
+}
+
+fn is_false(x: &bool) -> bool {
+    !*x
 }

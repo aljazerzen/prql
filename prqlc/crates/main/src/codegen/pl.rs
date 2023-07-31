@@ -21,11 +21,13 @@ impl std::fmt::Display for TyKind {
 
 impl WriteSource for Ty {
     fn write(&self, opt: WriteOpt) -> Option<String> {
-        if let Some(name) = &self.name {
+        let r = if let Some(name) = &self.name {
             Some(name.clone())
         } else {
             self.kind.write(opt)
-        }
+        }?;
+
+        Some(if self.infer { format!("^{r}") } else { r })
     }
 }
 

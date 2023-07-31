@@ -1,34 +1,44 @@
 ---
 source: prqlc/crates/main/src/semantic/resolver/mod.rs
-expression: "resolve_lineage(r#\"\n            from orders\n            select {customer_no, gross, tax, gross - tax}\n            take 20\n            \"#).unwrap()"
+expression: "resolve_ty(r#\"\n            from orders\n            select {customer_no, gross, tax, gross - tax}\n            take 20\n            \"#).unwrap()"
 ---
-columns:
-  - Single:
-      name:
-        - orders
-        - customer_no
-      target_id: 205
-      target_name: ~
-  - Single:
-      name:
-        - orders
-        - gross
-      target_id: 206
-      target_name: ~
-  - Single:
-      name:
-        - orders
-        - tax
-      target_id: 207
-      target_name: ~
-  - Single:
-      name: ~
-      target_id: 208
-      target_name: ~
-inputs:
-  - id: 204
-    name: orders
-    table:
-      - default_db
-      - orders
+kind:
+  Array:
+    kind:
+      Tuple:
+        - Single:
+            - customer_no
+            - kind: Any
+              lineage: 212
+              infer: true
+        - Single:
+            - gross
+            - kind: Any
+              lineage: 212
+              infer: true
+        - Single:
+            - tax
+            - kind: Any
+              lineage: 212
+              infer: true
+        - Single:
+            - ~
+            - kind:
+                Union:
+                  - - int
+                    - kind:
+                        Primitive: Int
+                      name: int
+                  - - float
+                    - kind:
+                        Primitive: Float
+                      name: float
+                  - - timestamp
+                    - kind:
+                        Primitive: Timestamp
+                      name: timestamp
+                  - - date
+                    - kind:
+                        Primitive: Date
+                      name: date
 
