@@ -38,10 +38,10 @@ pub enum StmtKind {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct VarDef {
-    pub name: Option<String>,
+    pub kind: VarDefKind,
+    pub name: String,
     pub value: Box<Expr>,
     pub ty_expr: Option<Box<Expr>>,
-    pub kind: VarDefKind,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

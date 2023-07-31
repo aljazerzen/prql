@@ -100,7 +100,7 @@ impl Resolver {
                     ty.name = Some(ident.name.clone());
 
                     VarDef {
-                        name: Some(ty_def.name),
+                        name: ty_def.name,
                         value: Box::new(Expr::new(ExprKind::Type(ty))),
                         ty_expr: None,
                         kind: VarDefKind::Let,

@@ -218,14 +218,8 @@ pub fn expand_stmts(value: Vec<Stmt>) -> Result<Vec<pl::Stmt>> {
 fn expand_stmt_kind(value: StmtKind) -> Result<pl::StmtKind> {
     Ok(match value {
         StmtKind::QueryDef(v) => pl::StmtKind::QueryDef(v),
-        StmtKind::Main(v) => pl::StmtKind::VarDef(pl::VarDef {
-            name: None,
-            value: expand_expr_box(v)?,
-            ty_expr: None,
-            kind: pl::VarDefKind::Main,
-        }),
         StmtKind::VarDef(v) => pl::StmtKind::VarDef(pl::VarDef {
-            name: Some(v.name),
+            name: v.name,
             value: expand_expr_box(v.value)?,
             ty_expr: v.ty_expr.map(expand_expr_box).transpose()?,
             kind: expand_var_def_kind(v.kind),
@@ -245,6 +239,7 @@ fn expand_var_def_kind(value: VarDefKind) -> pl::VarDefKind {
     match value {
         VarDefKind::Let => pl::VarDefKind::Let,
         VarDefKind::Into => pl::VarDefKind::Into,
+        VarDefKind::Main => pl::VarDefKind::Main,
     }
 }
 

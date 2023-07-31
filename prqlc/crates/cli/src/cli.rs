@@ -641,23 +641,27 @@ group a_column (take 10 | sort b_column | derive {the_number = rank, last = lag 
         assert_display_snapshot!(String::from_utf8(output).unwrap().trim(), @r###"
         sources:
           '':
-          - Main:
-              Pipeline:
-                exprs:
-                - FuncCall:
-                    name:
-                      Ident:
-                      - from
-                    args:
-                    - Ident:
-                      - x
-                - FuncCall:
-                    name:
-                      Ident:
-                      - select
-                    args:
-                    - Ident:
-                      - y
+          - VarDef:
+              kind: Main
+              name: main
+              value:
+                Pipeline:
+                  exprs:
+                  - FuncCall:
+                      name:
+                        Ident:
+                        - from
+                      args:
+                      - Ident:
+                        - x
+                  - FuncCall:
+                      name:
+                        Ident:
+                        - select
+                      args:
+                      - Ident:
+                        - y
+              ty_expr: null
             annotations: []
         source_ids:
           1: ''

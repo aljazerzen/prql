@@ -65,13 +65,7 @@ fn test_stmt_ast_code_matches() {
         diff_code_after_start(
             &read_to_string("../../crates/ast/src/stmt.rs").unwrap(),
             &read_to_string("../../crates/main/src/ir/pl/stmt.rs").unwrap(),
-        ), @r###"
-    @@ .. @@
-    -    Main(Box<Expr>),
-    @@ .. @@
-    -    pub name: String,
-    +    pub name: Option<String>,
-    "###
+        ), @""
     )
 }
 
