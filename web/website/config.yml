@@ -3,6 +3,8 @@ languageCode: en-us
 title: PRQL
 theme: prql-theme
 
+publishDir: ../build
+
 disableKinds:
   - taxonomy
   - term
