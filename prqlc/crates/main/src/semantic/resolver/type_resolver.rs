@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use anyhow::Result;
 use itertools::Itertools;
 
@@ -32,21 +30,14 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
 
         // tuples
         ExprKind::Tuple(elements) => {
-            let mut set_elements = Vec::with_capacity(elements.len());
+            let mut fields = Vec::with_capacity(elements.len());
+            let mut has_other = false;
 
             for e in elements {
                 match try_restrict_range(e) {
                     // special case: {x..}
-                    Ok(Range { start, .. }) => {
-                        let inner = match start {
-                            Some(x) => Some(coerce_to_type(resolver, *x)?),
-                            None => None,
-                        };
-
-                        set_elements.push(TupleField::All {
-                            ty: inner,
-                            exclude: HashSet::new(),
-                        })
+                    Ok(Range { .. }) => {
+                        has_other = true;
                     }
 
                     // base: case
@@ -54,12 +45,12 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
                         let (name, ty) = coerce_to_aliased_type(resolver, e)?;
                         let ty = Some(ty);
 
-                        set_elements.push(TupleField::Single(name, ty));
+                        fields.push((name, ty));
                     }
                 }
             }
 
-            Ty::new(TyKind::Tuple(set_elements))
+            Ty::new(TyKind::Tuple(TyTuple { fields, has_other }))
         }
 
         // arrays
@@ -155,13 +146,17 @@ impl Resolver {
 
             ExprKind::Tuple(fields) | ExprKind::TupleFields(fields) => {
                 let mut ty_fields = Vec::with_capacity(fields.len());
+                let mut has_other = false;
 
                 for field in fields {
                     let ty = self.infer_type(field)?;
 
                     if let ExprKind::TupleFields(_) | ExprKind::TupleExclude { .. } = &field.kind {
                         let ty = ty.unwrap();
-                        ty_fields.extend(ty.kind.into_tuple().unwrap());
+                        let ty_tuple = ty.kind.into_tuple().unwrap();
+                        ty_fields.extend(ty_tuple.fields);
+                        has_other |= ty_tuple.has_other;
+
                         lineage = lineage.or(ty.lineage);
                         instance_of = instance_of.or(ty.instance_of);
                         continue;
@@ -175,19 +170,20 @@ impl Resolver {
 
                     // remove names from previous fields with the same name
                     if name.is_some() {
-                        for x in ty_fields.iter_mut() {
-                            if let TupleField::Single(n, _) = x {
-                                if n.as_ref() == name.as_ref() {
-                                    *n = None;
-                                }
+                        for (n, _) in ty_fields.iter_mut() {
+                            if n.as_ref() == name.as_ref() {
+                                *n = None;
                             }
                         }
                     }
 
-                    ty_fields.push(TupleField::Single(name, ty));
+                    ty_fields.push((name, ty));
                 }
 
-                TyKind::Tuple(ty_fields)
+                TyKind::Tuple(TyTuple {
+                    fields: ty_fields,
+                    has_other,
+                })
             }
             ExprKind::TupleExclude { expr, exclude } => {
                 // TODO: handle non-tuples gracefully
@@ -197,7 +193,7 @@ impl Resolver {
                 let tuple = ty.kind.as_tuple().unwrap();
 
                 // special case: all
-                if let Some((t, e)) = tuple.iter().find_map(|c| c.as_all()) {
+                if tuple.has_other {
                     // Tuple has a wildcard (i.e. we don't know all the columns)
                     // which means we cannot list all columns, and we must use TupleField::All.
                     // We could do this for all columns, but it is less transparent,
@@ -205,34 +201,26 @@ impl Resolver {
 
                     // TODO: could there be two TupleField::All?
 
-                    let mut e = e.clone();
-                    e.extend(exclude.iter().cloned());
-
-                    let mut t = t.clone();
-                    if let Some(t) = &mut t {
-                        t.lineage = lineage.clone();
-                        t.instance_of = instance_of.clone();
-                    }
-
-                    TyKind::Tuple(vec![TupleField::All {
-                        ty: t.clone(),
-                        exclude: e,
-                    }])
+                    TyKind::Tuple(TyTuple {
+                        fields: Vec::new(),
+                        has_other: true,
+                    })
                 } else {
                     // base case: convert rel_def into frame columns
                     let fields = tuple
+                        .fields
                         .clone()
                         .into_iter()
-                        .filter(|f| {
-                            let (name, _) = f.as_single().unwrap();
-                            match name {
-                                Some(name) => !exclude.contains(&Ident::from_name(name)),
-                                None => true,
-                            }
+                        .filter(|(name, _)| match name {
+                            Some(name) => !exclude.contains(&Ident::from_name(name)),
+                            None => true,
                         })
                         .collect_vec();
 
-                    TyKind::Tuple(fields)
+                    TyKind::Tuple(TyTuple {
+                        fields,
+                        has_other: false,
+                    })
                 }
             }
 

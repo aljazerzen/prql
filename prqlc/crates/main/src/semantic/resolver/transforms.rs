@@ -1,9 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Result};
 use itertools::Itertools;
 use serde::Deserialize;
-use std::iter::zip;
 
 use crate::ir::generic::{SortDirection, WindowKind};
 use crate::ir::pl::PlFold;
@@ -358,7 +357,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
                 .columns
                 .iter()
                 .cloned()
-                .map(|x| TupleField::Single(Some(x), None))
+                .map(|x| (Some(x), None))
                 .collect();
 
             let ty = resolver.declare_table_for_literal(expr_id, Some(columns), Some(input_name));
@@ -518,10 +517,10 @@ impl Resolver {
                 .clone()
                 .and_then(|t| t.into_relation())
                 .or_else(|| {
-                    Some(vec![TupleField::All {
-                        ty: None,
-                        exclude: HashSet::new(),
-                    }])
+                    Some(TyTuple {
+                        fields: Vec::new(),
+                        has_other: true,
+                    })
                 })
                 .map(Ty::relation)
                 .unwrap()
@@ -593,14 +592,14 @@ impl Resolver {
         })
     }
 
-    fn concat_tuples(&mut self, a: &[TupleField], b: &[TupleField]) -> Result<Ty> {
+    fn concat_tuples(&mut self, a: &TyTuple, b: &TyTuple) -> Result<Ty> {
         let new = Expr::new(ExprKind::Tuple(vec![
             Expr {
-                ty: Some(Ty::new(TyKind::Tuple(a.to_vec()))),
+                ty: Some(Ty::new(TyKind::Tuple(a.clone()))),
                 ..Expr::new(ExprKind::TupleFields(vec![]))
             },
             Expr {
-                ty: Some(Ty::new(TyKind::Tuple(b.to_vec()))),
+                ty: Some(Ty::new(TyKind::Tuple(b.clone()))),
                 ..Expr::new(ExprKind::TupleFields(vec![]))
             },
         ]));
@@ -609,62 +608,17 @@ impl Resolver {
 }
 
 fn join_relations(mut lhs: Ty, rhs: Ty) -> Ty {
-    let lhs_fields = lhs.as_relation_mut().unwrap();
+    let lhs_tuple = lhs.as_relation_mut().unwrap();
 
     let rhs = rhs.into_relation().unwrap();
-    lhs_fields.extend(rhs);
+    lhs_tuple.fields.extend(rhs.fields);
+    lhs_tuple.has_other = lhs_tuple.has_other || rhs.has_other;
 
     lhs
 }
 
-fn append_relations(mut top: Ty, mut bottom: Ty) -> Result<Ty, Error> {
-    let top_fields = top.as_relation_mut().unwrap();
-    let bottom_fields = bottom.as_relation_mut().unwrap();
-
-    if top_fields.len() != bottom_fields.len() {
-        return Err(Error::new_simple(
-            "cannot append two relations with non-matching number of columns.",
-        ))
-        .push_hint(format!(
-            "top has {} columns, but bottom has {}",
-            top_fields.len(),
-            bottom_fields.len()
-        ));
-    }
-
-    // TODO: I'm not sure what to use as input_name and expr_id...
-    let mut fields = Vec::with_capacity(top_fields.len());
-    for (t, b) in zip(top_fields.drain(..), bottom_fields.drain(..)) {
-        fields.push(match (t, b) {
-            (
-                TupleField::All {
-                    ty,
-                    exclude: except,
-                },
-                TupleField::All { .. },
-            ) => TupleField::All {
-                ty,
-                exclude: except,
-            },
-            (TupleField::Single(name_top, ty_top), TupleField::Single(name_bot, _)) => {
-                let name = match (name_top, name_bot) {
-                    (None, None) => None,
-                    (None, Some(name)) | (Some(name), _) => Some(name),
-                };
-
-                TupleField::Single(name, ty_top)
-            }
-            (t, b) => {
-                let msg = format!("cannot match columns `{t:?}` and `{b:?}`");
-                let hint =
-                    "make sure that top and bottom relations of append has the same column layout";
-                return Err(Error::new_simple(msg).push_hint(hint));
-            }
-        });
-    }
-
-    top_fields.extend(fields);
-    Ok(top)
+fn append_relations(_top: Ty, _bottom: Ty) -> Result<Ty, Error> {
+    todo!("type intersection")
 }
 
 // Expects closure's args to be resolved.

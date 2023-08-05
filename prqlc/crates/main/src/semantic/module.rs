@@ -4,7 +4,7 @@ use anyhow::Result;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::ir::pl::{Expr, Ident, TupleField, Ty, TyKind};
+use crate::ir::pl::{Expr, Ident, Ty, TyKind, TyTuple};
 use crate::Error;
 
 use super::context::{Decl, DeclKind, TableDecl, TableExpr};
@@ -67,10 +67,10 @@ impl Module {
         let mut col_ty = Ty::new(TyKind::Any);
         col_ty.infer = true;
 
-        let table_ty = Ty::relation(vec![TupleField::All {
-            ty: Some(col_ty),
-            exclude: HashSet::new(),
-        }]);
+        let table_ty = Ty::relation(TyTuple {
+            fields: Vec::new(),
+            has_other: true,
+        });
 
         let names = HashMap::from([
             (
@@ -238,7 +238,7 @@ impl Module {
 
         let decl_kind = match &ty.kind {
             // for tuples, create a submodule
-            TyKind::Tuple(fields) => {
+            TyKind::Tuple(tuple) => {
                 let mut sub_mod = Module::default();
 
                 if let Some(instance_of) = &ty.instance_of {
@@ -255,29 +255,25 @@ impl Module {
                     sub_mod.names.insert(NS_SELF.to_string(), self_decl);
                 }
 
-                for (index, field) in fields.iter().enumerate() {
-                    match field {
-                        TupleField::Single(None, _) => {
-                            // unnamed tuple fields cannot be references,
-                            // so there is no point of having them in the module
-                            continue;
-                        }
-
-                        TupleField::Single(Some(name), ty) => {
-                            sub_mod.insert_ty(name.clone(), ty.as_ref().unwrap(), index + 1);
-                        }
-
-                        TupleField::All { ty: field_ty, .. } => {
-                            let mut field_ty = field_ty.clone().unwrap();
-                            field_ty.lineage = ty.lineage;
-
-                            let decl_kind = DeclKind::Infer(Box::new(DeclKind::Column(field_ty)));
-
-                            let mut decl = Decl::from(decl_kind);
-                            decl.order = index + 1;
-                            sub_mod.names.insert(NS_INFER.to_string(), decl);
-                        }
+                for (index, (name, ty)) in tuple.fields.iter().enumerate() {
+                    if let Some(name) = name {
+                        sub_mod.insert_ty(name.clone(), ty.as_ref().unwrap(), index + 1);
+                    } else {
+                        // unnamed tuple fields cannot be references,
+                        // so there is no point of having them in the module
                     }
+                }
+                if tuple.has_other {
+                    let field_ty = Ty {
+                        lineage: ty.lineage,
+                        ..Ty::new(TyKind::Any)
+                    };
+
+                    let decl_kind = DeclKind::Infer(Box::new(DeclKind::Column(field_ty)));
+
+                    let mut decl = Decl::from(decl_kind);
+                    decl.order = tuple.fields.len() + 1;
+                    sub_mod.names.insert(NS_INFER.to_string(), decl);
                 }
 
                 self.redirects.insert(Ident::from_name(&name));

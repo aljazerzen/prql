@@ -61,7 +61,7 @@ pub fn print_mem_sizes() {
     println!("{:16}= {}", "TableRef", size_of::<TableRef>());
     println!("{:16}= {}", "TransformCall", size_of::<TransformCall>());
     println!("{:16}= {}", "TransformKind", size_of::<TransformKind>());
-    println!("{:16}= {}", "TupleField", size_of::<TupleField>());
+    println!("{:16}= {}", "TyTuple", size_of::<TyTuple>());
     println!("{:16}= {}", "Ty", size_of::<Ty>());
     println!("{:16}= {}", "TyFunc", size_of::<TyFunc>());
     println!("{:16}= {}", "TyKind", size_of::<TyKind>());

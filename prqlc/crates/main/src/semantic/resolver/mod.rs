@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::iter::zip;
 
 use anyhow::Result;
@@ -173,22 +173,23 @@ impl Resolver {
         let table_decl = self.context.root_mod.get(table_fq).unwrap();
         let TableDecl { ty, .. } = table_decl.kind.as_table_decl().unwrap();
 
-        let fields = ty.as_ref().and_then(|t| t.as_relation()).cloned();
-        let fields = fields.unwrap_or_else(|| {
-            vec![TupleField::All {
-                ty: None,
-                exclude: HashSet::new(),
-            }]
+        let inner = ty.as_ref().and_then(|t| t.as_relation()).cloned();
+        let inner = inner.unwrap_or_else(|| TyTuple {
+            fields: Vec::new(),
+            has_other: true,
         });
 
         // wrap with the tuple name
-        let mut tuple = Ty::new(TyKind::Tuple(fields));
-        tuple.lineage = Some(input_id);
-        tuple.instance_of = Some(table_fq.clone());
-        let fields = vec![TupleField::Single(Some(input_name), Some(tuple))];
+        let mut inner = Ty::new(TyKind::Tuple(inner));
+        inner.lineage = Some(input_id);
+        inner.instance_of = Some(table_fq.clone());
+        let tuple = TyTuple {
+            fields: vec![(Some(input_name), Some(inner))],
+            has_other: false,
+        };
 
-        log::debug!("instanced table {table_fq} as {fields:?}");
-        Ty::relation(fields)
+        log::debug!("instanced table {table_fq} as {tuple:?}");
+        Ty::relation(tuple)
     }
 
     /// Declares a new table for a relation literal.
@@ -196,7 +197,7 @@ impl Resolver {
     pub fn declare_table_for_literal(
         &mut self,
         input_id: usize,
-        columns: Option<Vec<TupleField>>,
+        columns: Option<Vec<TyTupleField>>,
         name_hint: Option<String>,
     ) -> Ty {
         let id = input_id;
@@ -213,8 +214,11 @@ impl Resolver {
         let table_decl = infer_default.as_table_decl_mut().unwrap();
         table_decl.expr = TableExpr::None;
 
-        if let Some(columns) = columns {
-            table_decl.ty = Some(Ty::relation(columns));
+        if let Some(fields) = columns {
+            table_decl.ty = Some(Ty::relation(TyTuple {
+                fields,
+                has_other: false,
+            }));
         }
 
         default_db
@@ -446,11 +450,9 @@ pub(super) fn create_tuple_exclude(
     let exclude = exclude_tuple.ty.unwrap().kind.into_tuple().unwrap();
 
     let exclude = exclude
+        .fields
         .into_iter()
-        .filter_map(|x| match x {
-            TupleField::Single(Some(name), _) => Some(Ident::from_name(name)),
-            _ => None,
-        })
+        .filter_map(|(name, _)| name.map(Ident::from_name))
         .collect();
 
     let expr = Box::new(expr);

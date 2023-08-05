@@ -57,8 +57,15 @@ impl WriteSource for TyKind {
                 .write(opt)
             }
             Singleton(lit) => Some(lit.to_string()),
-            Tuple(elements) => SeparatedExprs {
-                exprs: elements,
+            Tuple(tuple) => SeparatedExprs {
+                exprs: &(tuple.fields.iter())
+                    .map(TupleElement::Single)
+                    .chain(if tuple.has_other {
+                        vec![TupleElement::Others]
+                    } else {
+                        vec![]
+                    })
+                    .collect_vec(),
                 inline: ", ",
                 line_end: ",",
             }
@@ -82,22 +89,15 @@ impl WriteSource for TyKind {
     }
 }
 
-impl WriteSource for TupleField {
+enum TupleElement<'a> {
+    Single(&'a (Option<String>, Option<Ty>)),
+    Others,
+}
+
+impl<'a> WriteSource for TupleElement<'a> {
     fn write(&self, opt: WriteOpt) -> Option<String> {
         match self {
-            Self::All { ty, exclude } => {
-                let mut r = match ty {
-                    Some(el) => format!("{}..", el.write(opt)?),
-                    None => "*..".to_string(),
-                };
-
-                if !exclude.is_empty() {
-                    r += &format!("!{{{}}}", exclude.iter().map(Ident::to_string).join(","));
-                }
-
-                Some(r)
-            }
-            Self::Single(name, expr) => {
+            Self::Single((name, expr)) => {
                 let mut r = String::new();
 
                 if let Some(name) = name {
@@ -111,6 +111,7 @@ impl WriteSource for TupleField {
                 }
                 Some(r)
             }
+            Self::Others => Some("..".to_string()),
         }
     }
 }

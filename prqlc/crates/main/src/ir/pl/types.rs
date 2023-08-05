@@ -1,4 +1,4 @@
-use std::{collections::HashSet, iter::zip};
+use std::iter::zip;
 
 use enum_as_inner::EnumAsInner;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ pub enum TyKind {
     Union(Vec<(Option<String>, Ty)>),
 
     /// Type of tuples (product)
-    Tuple(Vec<TupleField>),
+    Tuple(TyTuple),
 
     /// Type of arrays
     Array(Box<Ty>),
@@ -34,18 +34,16 @@ pub enum TyKind {
     Any,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumAsInner)]
-pub enum TupleField {
-    /// Named tuple element.
-    Single(Option<String>, Option<Ty>),
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TyTuple {
+    /// Tuple fields, optionally named.
+    pub fields: Vec<TyTupleField>,
 
-    /// Placeholder for possibly many elements.
-    /// Means "all columns". Does not mean "other unmentioned columns"
-    All {
-        ty: Option<Ty>,
-        exclude: HashSet<Ident>,
-    },
+    /// True when the tuple can have additional fields that we have no knowledge of at the moment.
+    pub has_other: bool,
 }
+
+pub type TyTupleField = (Option<String>, Option<Ty>);
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ty {
@@ -109,20 +107,20 @@ impl Ty {
         }
     }
 
-    pub fn relation(tuple_fields: Vec<TupleField>) -> Self {
-        let tuple = Ty::new(TyKind::Tuple(tuple_fields));
+    pub fn relation(tuple: TyTuple) -> Self {
+        let tuple = Ty::new(TyKind::Tuple(tuple));
         Ty::new(TyKind::Array(Box::new(tuple)))
     }
 
-    pub fn as_relation(&self) -> Option<&Vec<TupleField>> {
+    pub fn as_relation(&self) -> Option<&TyTuple> {
         self.kind.as_array()?.kind.as_tuple()
     }
 
-    pub fn as_relation_mut(&mut self) -> Option<&mut Vec<TupleField>> {
+    pub fn as_relation_mut(&mut self) -> Option<&mut TyTuple> {
         self.kind.as_array_mut()?.kind.as_tuple_mut()
     }
 
-    pub fn into_relation(self) -> Option<Vec<TupleField>> {
+    pub fn into_relation(self) -> Option<TyTuple> {
         self.kind.into_array().ok()?.kind.into_tuple().ok()
     }
 
@@ -192,41 +190,34 @@ impl TyKind {
 
             (TyKind::Array(sup), TyKind::Array(sub)) => sup.is_super_type_of(sub),
 
-            (TyKind::Tuple(sup_fields), TyKind::Tuple(sub_fields)) => {
-                let mut sub_fields = sub_fields.iter();
+            (TyKind::Tuple(sup_tuple), TyKind::Tuple(sub_tuple)) => {
+                let mut sup_fields = sup_tuple.fields.iter();
+                let mut sub_fields = sub_tuple.fields.iter();
 
-                for sup_field in sup_fields {
-                    match sup_field {
-                        TupleField::Single(_, sup) => match sub_fields.next() {
-                            Some(TupleField::Single(_, sub)) => {
-                                if is_not_super_type_of(sup, sub) {
-                                    return false;
-                                }
-                            }
-                            Some(TupleField::All { .. }) | None => {
+                loop {
+                    let sup = sup_fields.next();
+                    let sub = sub_fields.next();
+
+                    match (sup, sub) {
+                        (Some((_, sup)), Some((_, sub))) => {
+                            if is_not_super_type_of(sup, sub) {
                                 return false;
                             }
-                        },
-                        TupleField::All { ty: sup, .. } => loop {
-                            match sub_fields.next() {
-                                Some(TupleField::Single(_, sub)) => {
-                                    if is_not_super_type_of(sup, sub) {
-                                        return false;
-                                    }
-                                }
-                                Some(TupleField::All { ty: sub, .. }) => {
-                                    if is_not_super_type_of(sup, sub) {
-                                        return false;
-                                    }
-                                    break;
-                                }
-                                None => break,
+                        }
+                        (None, Some(_)) => {
+                            if !sup_tuple.has_other {
+                                return false;
                             }
-                        },
+                        }
+                        (Some(_), None) => {
+                            if !sub_tuple.has_other {
+                                return false;
+                            }
+                        }
+                        (None, None) => break,
                     }
                 }
-
-                sub_fields.next().is_none()
+                true
             }
 
             (l, r) => l == r,
@@ -248,31 +239,31 @@ impl Ty {
     fn rename_tuples(&mut self, alias: String) {
         self.flatten_tuples();
 
-        if let TyKind::Tuple(fields) = &mut self.kind {
-            let inner_fields = std::mem::take(fields);
+        if let TyKind::Tuple(tuple) = &mut self.kind {
+            let inner_tuple = std::mem::take(tuple);
 
             let ty = Ty {
                 lineage: self.lineage,
                 instance_of: self.instance_of.clone(),
-                ..Ty::new(TyKind::Tuple(inner_fields))
+                ..Ty::new(TyKind::Tuple(inner_tuple))
             };
-            fields.push(TupleField::Single(Some(alias), Some(ty)));
+            tuple.fields.push((Some(alias), Some(ty)));
         }
     }
 
     /// Converts {y = {T3, z = T4}}
     /// into {T3, z = T4}]
     pub fn flatten_tuples(&mut self) {
-        if let TyKind::Tuple(fields) = &mut self.kind {
+        if let TyKind::Tuple(tuple) = &mut self.kind {
             let mut new_fields = Vec::new();
 
-            for field in fields.drain(..) {
-                if let TupleField::Single(name, Some(ty)) = field {
+            for (name, ty) in tuple.fields.drain(..) {
+                if let Some(ty) = ty {
                     // recurse
                     // let ty = ty.flatten_tuples();
 
                     if let TyKind::Tuple(inner_fields) = ty.kind {
-                        new_fields.extend(inner_fields);
+                        new_fields.extend(inner_fields.fields);
 
                         if self.lineage.is_none() {
                             self.lineage = ty.lineage
@@ -283,23 +274,14 @@ impl Ty {
                         continue;
                     }
 
-                    new_fields.push(TupleField::Single(name, Some(ty)));
+                    new_fields.push((name, Some(ty)));
                     continue;
                 }
 
-                new_fields.push(field);
+                new_fields.push((name, ty));
             }
 
-            fields.extend(new_fields);
-        }
-    }
-}
-
-impl TupleField {
-    pub fn ty(&self) -> Option<&Ty> {
-        match self {
-            TupleField::Single(_, ty) => ty.as_ref(),
-            TupleField::All { ty, .. } => ty.as_ref(),
+            tuple.fields.extend(new_fields);
         }
     }
 }

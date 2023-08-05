@@ -7,7 +7,7 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
 use crate::ir::generic::{ColumnSort, WindowFrame};
-use crate::ir::pl::{self, Ident, PlFold, QueryDef, TupleField, Ty};
+use crate::ir::pl::{self, Ident, PlFold, QueryDef, Ty, TyTuple};
 use crate::ir::rq::{self, CId, Query, RelationColumn, RelationLiteral, TId, TableDecl, Transform};
 use crate::semantic::context::TableExpr;
 use crate::semantic::module::Module;
@@ -66,10 +66,7 @@ pub fn lower_to_ir(context: Context, main_path: &[String]) -> Result<(Query, Con
     Ok((query, l.context))
 }
 
-fn extern_ref_to_relation(
-    mut columns: Vec<TupleField>,
-    fq_ident: &Ident,
-) -> (rq::Relation, Option<String>) {
+fn extern_ref_to_relation(tuple: TyTuple, fq_ident: &Ident) -> (rq::Relation, Option<String>) {
     let extern_name = if fq_ident.starts_with_part(NS_DEFAULT_DB) {
         let (_, remainder) = fq_ident.clone().pop_front();
         remainder.unwrap()
@@ -78,24 +75,24 @@ fn extern_ref_to_relation(
         todo!()
     };
 
-    // put wildcards last
-    columns.sort_by_key(|a| matches!(a, TupleField::All { .. }));
-
     let relation = rq::Relation {
         kind: rq::RelationKind::ExternRef(extern_name),
-        columns: tuple_fields_to_relation_columns(columns),
+        columns: tuple_fields_to_relation_columns(tuple),
     };
     (relation, None)
 }
 
-fn tuple_fields_to_relation_columns(columns: Vec<TupleField>) -> Vec<RelationColumn> {
-    columns
+fn tuple_fields_to_relation_columns(tuple: TyTuple) -> Vec<RelationColumn> {
+    let mut relation_columns = tuple
+        .fields
         .into_iter()
-        .map(|field| match field {
-            TupleField::Single(name, _) => RelationColumn::Single(name),
-            TupleField::All { .. } => RelationColumn::Wildcard,
-        })
-        .collect_vec()
+        .map(|(name, _)| RelationColumn::Single(name))
+        .collect_vec();
+
+    if tuple.has_other {
+        relation_columns.push(RelationColumn::Wildcard)
+    }
+    relation_columns
 }
 
 fn validate_query_def(query_def: &QueryDef) -> Result<()> {
@@ -302,8 +299,8 @@ impl Lowerer {
                 // pull columns from the table decl
                 let ty = expr.ty.as_ref().unwrap();
                 let relation_fields = ty.as_relation().unwrap();
-                let columns = (relation_fields.iter())
-                    .map(|c| RelationColumn::Single(c.as_single().unwrap().0.clone()))
+                let columns = (relation_fields.fields.iter())
+                    .map(|(name, _)| RelationColumn::Single(name.clone()))
                     .collect_vec();
 
                 let lit = RelationLiteral {
@@ -815,43 +812,37 @@ impl Lowerer {
         Ok(cid)
     }
 
-    fn lookup_cids_of_tuple(
-        &mut self,
-        fields: Vec<TupleField>,
-    ) -> Result<Vec<(RelationColumn, CId)>> {
+    fn lookup_cids_of_tuple(&mut self, tuple: TyTuple) -> Result<Vec<(RelationColumn, CId)>> {
         let mut columns = Vec::new();
-        for col in &fields {
-            match col {
-                TupleField::Single(name, ty) => {
-                    let lineage = ty.as_ref().unwrap().lineage.unwrap();
-                    let cid = self.lookup_cid(lineage, name.as_ref())?;
+        for (name, ty) in tuple.fields {
+            let lineage = ty.as_ref().unwrap().lineage.unwrap();
+            let cid = self.lookup_cid(lineage, name.as_ref())?;
 
-                    columns.push((RelationColumn::Single(name.clone()), cid));
-                }
-                TupleField::All { exclude, ty } => {
-                    let input_id = ty.as_ref().unwrap().lineage.unwrap();
+            columns.push((RelationColumn::Single(name.clone()), cid));
+        }
+        if tuple.has_other {
+            todo!("lowering of tuple with other fields")
+            // let input_id = ty.as_ref().unwrap().lineage.unwrap();
 
-                    match &self.node_mapping[&input_id] {
-                        LoweredTarget::Compute(_cid) => unreachable!(),
-                        LoweredTarget::Input(input_cols) => {
-                            let mut input_cols = input_cols
-                                .iter()
-                                .filter(|(c, _)| match c {
-                                    RelationColumn::Single(Some(name)) => {
-                                        !exclude.contains(&Ident::from_name(name))
-                                    }
-                                    _ => true,
-                                })
-                                .collect_vec();
-                            input_cols.sort_by_key(|e| e.1 .1);
+            // match &self.node_mapping[&input_id] {
+            //     LoweredTarget::Compute(_cid) => unreachable!(),
+            //     LoweredTarget::Input(input_cols) => {
+            //         let mut input_cols = input_cols
+            //             .iter()
+            //             .filter(|(c, _)| match c {
+            //                 RelationColumn::Single(Some(name)) => {
+            //                     !exclude.contains(&Ident::from_name(name))
+            //                 }
+            //                 _ => true,
+            //             })
+            //             .collect_vec();
+            //         input_cols.sort_by_key(|e| e.1 .1);
 
-                            for (col, (cid, _)) in input_cols {
-                                columns.push((col.clone(), *cid));
-                            }
-                        }
-                    }
-                }
-            }
+            //         for (col, (cid, _)) in input_cols {
+            //             columns.push((col.clone(), *cid));
+            //         }
+            //     }
+            // }
         }
         Ok(columns)
     }
@@ -864,7 +855,7 @@ fn as_instance_of(ty: &Option<Ty>) -> Option<&Ident> {
     // relation tuples contain a nested tuple that refers to the instanced table
     // we assume that this expression is a direct instance (not after joins or new columns)
     // so we can just pick the first tuple field.
-    let instance_tuple = relation_tuple[0].as_single()?.1.as_ref()?;
+    let instance_tuple = relation_tuple.fields[0].1.as_ref()?;
 
     instance_tuple.instance_of.as_ref()
 }

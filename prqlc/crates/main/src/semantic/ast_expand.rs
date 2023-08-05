@@ -376,22 +376,17 @@ fn restrict_ty(value: pl::Ty) -> prqlc_ast::expr::Expr {
             }
             return res;
         }
-        pl::TyKind::Tuple(fields) => ExprKind::Tuple(
-            fields
+        pl::TyKind::Tuple(tuple) => ExprKind::Tuple(
+            tuple
+                .fields
                 .into_iter()
-                .map(|field| match field {
-                    pl::TupleField::Single(name, ty) => {
-                        // TODO: ty might be None
-                        let mut e = restrict_ty(ty.unwrap());
-                        if let Some(name) = name {
-                            e.alias = Some(name);
-                        }
-                        e
+                .map(|(name, ty)| {
+                    // TODO: ty might be None
+                    let mut e = restrict_ty(ty.unwrap());
+                    if let Some(name) = name {
+                        e.alias = Some(name);
                     }
-                    pl::TupleField::All { .. } => {
-                        // TODO: this is not correct
-                        Expr::new(ExprKind::Ident(Ident::from_name("*")))
-                    }
+                    e
                 })
                 .collect(),
         ),

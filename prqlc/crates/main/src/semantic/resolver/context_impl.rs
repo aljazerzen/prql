@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use prqlc_ast::expr::Ident;
 
-use crate::ir::pl::{Annotation, Expr, ExprKind, TupleField, Ty};
+use crate::ir::pl::{Annotation, Expr, ExprKind, Ty, TyKind};
 use crate::semantic::context::{Decl, DeclKind, TableDecl, TableExpr};
 use crate::semantic::{Context, Module, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS};
 use crate::{Error, WithErrorInfo};
@@ -187,19 +187,14 @@ impl Context {
         let decl = self.root_mod.get(instance_of).unwrap();
         let decl = decl.kind.as_table_decl().unwrap();
 
-        let fields = decl.ty.as_ref().unwrap().as_relation().unwrap();
+        let tuple = decl.ty.as_ref().unwrap().as_relation().unwrap();
 
-        let fields = fields
+        let fields = tuple
+            .fields
             .iter()
-            .flat_map(|f| match f {
-                TupleField::Single(None, _) => None,
-                TupleField::Single(Some(name), _) => {
-                    Some(Expr::new(mod_ident.clone() + Ident::from_name(name)))
-                }
-                TupleField::All { exclude, .. } => Some(Expr::new(ExprKind::TupleExclude {
-                    expr: Box::new(Expr::new(mod_ident.clone())),
-                    exclude: exclude.clone(),
-                })),
+            .flat_map(|(name, _)| match name {
+                None => None,
+                Some(name) => Some(Expr::new(mod_ident.clone() + Ident::from_name(name))),
             })
             .collect_vec();
 
@@ -230,47 +225,36 @@ impl Context {
         let table = self.root_mod.get_mut(table_ident).unwrap();
         let table_decl = table.kind.as_table_decl_mut().unwrap();
 
-        let Some(columns) = table_decl.ty.as_mut().and_then(|t| t.as_relation_mut()) else {
+        let Some(ty_tuple) = table_decl.ty.as_mut().and_then(|t| t.as_relation_mut()) else {
             return Err(format!("Variable {table_ident:?} is not a relation."));
         };
 
-        let ty = if let Some(all) = columns.iter_mut().find_map(|c| c.as_all_mut()) {
-            all.1.insert(Ident::from_name(col_name));
-
-            // Use the type from TupleField::All for the inferred field.
-            all.0.clone()
-        } else {
+        if !ty_tuple.has_other {
             return Err(format!("Table {table_ident:?} does not have wildcard."));
         };
 
-        let exists = columns.iter().any(|c| match c {
-            TupleField::Single(Some(n), _) => n == col_name,
+        let exists = ty_tuple.fields.iter().any(|(name, _)| match name {
+            Some(n) => n == col_name,
             _ => false,
         });
         if exists {
             return Ok(());
         }
 
-        columns.push(TupleField::Single(Some(col_name.to_string()), ty));
+        let ty = Some(Ty::new(TyKind::Any));
+        ty_tuple.fields.push((Some(col_name.to_string()), ty));
 
         // also add into input tables of this table expression
         if let TableExpr::RelationVar(expr) = &table_decl.expr {
             if let Some(ty) = &expr.ty {
-                if let Some(fields) = ty.as_relation() {
-                    let wildcard_inputs = (fields.iter()).filter_map(|c| c.as_all()).collect_vec();
+                if let Some(tuple) = ty.as_relation() {
+                    if tuple.has_other {
+                        todo!("column inference")
+                        // let (wildcard_ty, _) = wildcard_inputs.into_iter().next().unwrap();
+                        // let wildcard_ty = wildcard_ty.as_ref().unwrap();
+                        // let table_fq = wildcard_ty.instance_of.clone().unwrap();
 
-                    match wildcard_inputs.len() {
-                        0 => return Err(format!("Cannot infer where {table_ident}.{col_name} is from")),
-                        1 => {
-                            let (wildcard_ty, _) = wildcard_inputs.into_iter().next().unwrap();
-                            let wildcard_ty = wildcard_ty.as_ref().unwrap();
-                            let table_fq = wildcard_ty.instance_of.clone().unwrap();
-
-                            self.infer_table_column(&table_fq, col_name)?;
-                        }
-                        _ => {
-                            return Err(format!("Cannot infer where {table_ident}.{col_name} is from. It could be any of {wildcard_inputs:?}"))
-                        }
+                        // self.infer_table_column(&table_fq, col_name)?;
                     }
                 }
             }
