@@ -1,30 +1,19 @@
-use std::collections::hash_map::RandomState;
-use std::collections::HashMap;
-use std::iter::zip;
-
 use anyhow::Result;
-use enum_as_inner::EnumAsInner;
-use itertools::Itertools;
 
-use crate::ir::generic::{ColumnSort, WindowFrame};
-use crate::ir::pl::{self, Ident, PlFold, QueryDef, Ty, TyTuple};
-use crate::ir::rq::{self, CId, Query, RelationColumn, RelationLiteral, TId, TableDecl, Transform};
-use crate::semantic::context::TableExpr;
-use crate::semantic::module::Module;
-use crate::semantic::write_pl;
-use crate::utils::{toposort, IdGenerator};
-use crate::COMPILER_VERSION;
-use crate::{Error, Reason, Span, WithErrorInfo};
-use prqlc_ast::expr::generic::{InterpolateItem, Range, SwitchCase};
-
-use super::context::{self, Context, DeclKind};
-use super::NS_DEFAULT_DB;
+use super::context::Context;
+use crate::ir::rq::Query;
 
 /// Convert AST into IR and make sure that:
 /// - transforms are not nested,
 /// - transforms have correct partition, window and sort set,
 /// - make sure there are no unresolved expressions.
-pub fn lower_to_ir(context: Context, main_path: &[String]) -> Result<(Query, Context)> {
+pub fn lower_to_ir(_context: Context, _main_path: &[String]) -> Result<(Query, Context)> {
+    todo!();
+}
+
+/*
+This compiler pass is to be converted into a pass from SM into RQ
+
     // find main
     log::debug!("lookup for main pipeline in {main_path:?}");
     let (_, main_ident) = context.find_main_rel(main_path).map_err(|hint| {
@@ -1010,3 +999,4 @@ impl PlFold for TableDepsCollector {
         Ok(expr)
     }
 }
+*/

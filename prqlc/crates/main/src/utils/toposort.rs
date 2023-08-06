@@ -1,3 +1,6 @@
+// TODO: fate tied to lowering
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 type Dag = Vec<Vec<usize>>;
