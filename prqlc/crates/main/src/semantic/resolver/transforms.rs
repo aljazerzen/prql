@@ -8,6 +8,7 @@ use crate::ir::generic::{SortDirection, WindowKind};
 use crate::ir::pl::PlFold;
 use crate::ir::pl::*;
 use crate::semantic::ast_expand::try_restrict_range;
+use crate::semantic::resolver::type_resolver::type_intersection;
 use crate::semantic::write_pl;
 use crate::{Error, Reason, WithErrorInfo};
 
@@ -585,7 +586,7 @@ impl Resolver {
             Append(bottom) => {
                 let top = ty_relation_or_default(&transform.input);
                 let bottom = ty_relation_or_default(bottom);
-                append_relations(top, bottom)?
+                type_intersection(top, bottom)
             }
             Loop(_) => ty_relation_or_default(&transform.input),
             Sort { .. } | Filter { .. } | Take { .. } => ty_relation_or_default(&transform.input),
@@ -615,10 +616,6 @@ fn join_relations(mut lhs: Ty, rhs: Ty) -> Ty {
     lhs_tuple.has_other = lhs_tuple.has_other || rhs.has_other;
 
     lhs
-}
-
-fn append_relations(_top: Ty, _bottom: Ty) -> Result<Ty, Error> {
-    todo!("type intersection")
 }
 
 // Expects closure's args to be resolved.

@@ -155,6 +155,10 @@ impl Ty {
 }
 
 impl TyKind {
+    pub fn never() -> TyKind {
+        TyKind::Union(Vec::new())
+    }
+
     fn is_super_type_of(&self, subset: &TyKind) -> bool {
         match (self, subset) {
             (TyKind::Primitive(l0), TyKind::Primitive(r0)) => l0 == r0,

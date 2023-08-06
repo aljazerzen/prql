@@ -229,22 +229,13 @@ impl Resolver {
                 for item in items {
                     let item_ty = self.infer_type(item)?;
 
-                    if let Some(item_ty) = item_ty {
-                        if let Some(intersection) = &intersection {
-                            if intersection != &item_ty {
-                                // TODO: compute type intersection instead
-                                return Ok(None);
-                            }
-                        } else {
-                            intersection = Some(item_ty);
-                        }
-                    }
+                    intersection = maybe_type_intersection(intersection, item_ty)
                 }
-                let Some(items_ty) = intersection else {
-                    // TODO: return Array(Infer) instead of Infer
-                    return Ok(None);
-                };
-                TyKind::Array(Box::new(items_ty))
+                if let Some(items_ty) = intersection {
+                    TyKind::Array(Box::new(items_ty))
+                } else {
+                    TyKind::Array(Box::new(Ty::new(TyKind::Any)))
+                }
             }
 
             ExprKind::Func(func) => TyKind::Function(Some(TyFunc {
@@ -494,6 +485,91 @@ fn too_many_arguments(call: &FuncCall, expected_len: usize, passed_len: usize) -
 //         _ => None,
 //     }
 // }
+
+fn maybe_type_intersection(a: Option<Ty>, b: Option<Ty>) -> Option<Ty> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(type_intersection(a, b)),
+        (x, None) | (None, x) => x,
+    }
+}
+
+pub fn type_intersection(a: Ty, b: Ty) -> Ty {
+    match (&a.kind, &b.kind) {
+        (a_kind, b_kind) if a_kind == b_kind => a,
+
+        (TyKind::Any, _) => b,
+        (_, TyKind::Any) => a,
+
+        (TyKind::Union(_), _) => type_intersection_with_union(a, b),
+        (_, TyKind::Union(_)) => type_intersection_with_union(b, a),
+
+        (TyKind::Tuple(_), TyKind::Tuple(_)) => {
+            let a = a.kind.into_tuple().unwrap();
+            let b = b.kind.into_tuple().unwrap();
+
+            type_intersection_of_tuples(a, b)
+        }
+
+        (TyKind::Array(_), TyKind::Array(_)) => {
+            let a = a.kind.into_array().unwrap();
+            let b = b.kind.into_array().unwrap();
+            Ty::new(TyKind::Array(Box::new(type_intersection(*a, *b))))
+        }
+
+        _ => Ty::new(TyKind::never()),
+    }
+}
+fn type_intersection_with_union(union: Ty, b: Ty) -> Ty {
+    let variants = union.kind.into_union().unwrap();
+    let variants = variants
+        .into_iter()
+        .map(|(name, variant)| {
+            let inter = type_intersection(variant, b.clone());
+
+            (name, inter)
+        })
+        .collect_vec();
+
+    Ty::new(TyKind::Union(variants))
+}
+
+fn type_intersection_of_tuples(a: TyTuple, b: TyTuple) -> Ty {
+    let mut a_fields = a.fields.into_iter();
+    let mut b_fields = b.fields.into_iter();
+
+    let mut fields = Vec::new();
+    let mut has_other = false;
+    loop {
+        match (a_fields.next(), b_fields.next()) {
+            (None, None) => break,
+            (None, Some(b_field)) => {
+                if !a.has_other {
+                    return Ty::new(TyKind::never());
+                }
+                has_other = true;
+                fields.push(b_field);
+            }
+            (Some(a_field), None) => {
+                if !b.has_other {
+                    return Ty::new(TyKind::never());
+                }
+                has_other = true;
+                fields.push(a_field);
+            }
+            (Some((a_name, a_ty)), Some((b_name, b_ty))) => {
+                let name = match (a_name, b_name) {
+                    (None, None) | (Some(_), Some(_)) => None,
+                    (None, Some(n)) | (Some(n), None) => Some(n),
+                };
+                let ty = maybe_type_intersection(a_ty, b_ty);
+
+                fields.push((name, ty));
+            }
+        }
+    }
+
+    Ty::new(TyKind::Tuple(TyTuple { fields, has_other }))
+}
 
 #[cfg(test)]
 mod test {
