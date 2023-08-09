@@ -42,8 +42,6 @@ pub enum DeclKind {
     /// Nested namespaces that do lookup in layers from top to bottom, stopping at first match.
     LayeredModules(Vec<Module>),
 
-    TableDecl(TableDecl),
-
     InstanceOf {
         table_fq: Ident,
         lineage: usize,
@@ -93,13 +91,12 @@ pub enum TableColumn {
 impl Context {
     /// Finds that main pipeline given a path to either main itself or its parent module.
     /// Returns main expr and fq ident of the decl.
-    pub fn find_main_rel(&self, path: &[String]) -> Result<(&TableExpr, Ident), Option<String>> {
+    pub fn find_main_rel(&self, path: &[String]) -> Result<(&Expr, Ident), Option<String>> {
         let (decl, ident) = self.find_main(path)?;
 
-        let decl = (decl.kind.as_table_decl())
-            .ok_or(Some(format!("{ident} is not a relational variable")))?;
+        let decl = (decl.kind.as_expr()).ok_or(Some(format!("{ident} is not an expression")))?;
 
-        Ok((&decl.expr, ident))
+        Ok((decl, ident))
     }
 
     pub fn find_main(&self, path: &[String]) -> Result<(&Decl, Ident), Option<String>> {
@@ -188,13 +185,6 @@ impl std::fmt::Display for DeclKind {
         match self {
             Self::Module(arg0) => f.debug_tuple("Module").field(arg0).finish(),
             Self::LayeredModules(arg0) => f.debug_tuple("LayeredModules").field(arg0).finish(),
-            Self::TableDecl(TableDecl { ty, expr }) => {
-                write!(
-                    f,
-                    "TableDecl: {} {expr:?}",
-                    ty.as_ref().map(|t| t.to_string()).unwrap_or_default()
-                )
-            }
             Self::InstanceOf {
                 table_fq: arg0,
                 lineage: _,

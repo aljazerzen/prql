@@ -4,7 +4,7 @@ use std::ops::Range;
 use anyhow::{Ok, Result};
 use ariadne::{Color, Label, Report, ReportBuilder, ReportKind, Source};
 
-use super::context::{Context, DeclKind, TableDecl, TableExpr};
+use super::context::{Context, DeclKind};
 use super::NS_DEFAULT_DB;
 use crate::ir::pl::*;
 use crate::Span;
@@ -45,11 +45,7 @@ impl<'a> Labeler<'a> {
             let default_db = default_db.clone().kind.into_module().unwrap();
 
             for (_, decl) in default_db.names.into_iter() {
-                if let DeclKind::TableDecl(TableDecl {
-                    expr: TableExpr::RelationVar(expr),
-                    ..
-                }) = decl.kind
-                {
+                if let DeclKind::Expr(expr) = decl.kind {
                     self.fold_expr(*expr).unwrap();
                 }
             }
@@ -82,7 +78,6 @@ impl<'a> PlFold for Labeler<'a> {
                         DeclKind::Expr(_) => Color::Blue,
                         DeclKind::Column { .. } => Color::Yellow,
                         DeclKind::InstanceOf { .. } => Color::Yellow,
-                        DeclKind::TableDecl { .. } => Color::Red,
                         DeclKind::Module(_) => Color::Cyan,
                         DeclKind::LayeredModules(_) => Color::Cyan,
                         DeclKind::Infer(_) => Color::White,
@@ -94,16 +89,7 @@ impl<'a> PlFold for Labeler<'a> {
                         .and_then(|id| self.get_span_lines(id))
                         .unwrap_or_default();
 
-                    let decl = match &decl.kind {
-                        DeclKind::TableDecl(TableDecl { ty, .. }) => {
-                            format!(
-                                "table {}",
-                                ty.as_ref().and_then(|t| t.name.clone()).unwrap_or_default()
-                            )
-                        }
-                        _ => decl.to_string(),
-                    };
-
+                    let decl = decl.to_string();
                     (format!("{decl}{location}"), color)
                 } else if let Some(decl_id) = node.target_id {
                     let lines = self.get_span_lines(decl_id).unwrap_or_default();

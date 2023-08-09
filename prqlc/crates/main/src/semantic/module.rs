@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::ir::pl::{Expr, Ident, Ty, TyKind, TyTuple};
 use crate::Error;
 
-use super::context::{Decl, DeclKind, TableDecl, TableExpr};
+use super::context::{Decl, DeclKind};
 use super::{
     NS_DEFAULT_DB, NS_INFER, NS_INFER_MODULE, NS_PARAM, NS_SELF, NS_STD, NS_THAT, NS_THIS,
 };
@@ -75,10 +75,10 @@ impl Module {
         let names = HashMap::from([
             (
                 NS_INFER.to_string(),
-                Decl::from(DeclKind::Infer(Box::new(DeclKind::TableDecl(TableDecl {
+                Decl::from(DeclKind::Infer(Box::new(DeclKind::Expr(Box::new(Expr {
                     ty: Some(table_ty),
-                    expr: TableExpr::LocalTable,
-                })))),
+                    ..Expr::new(Ident::from_name(NS_INFER))
+                }))))),
             ),
             (
                 NS_INFER_MODULE.to_string(),

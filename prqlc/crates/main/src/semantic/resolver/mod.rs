@@ -5,12 +5,12 @@ use anyhow::Result;
 use itertools::{Itertools, Position};
 
 use crate::ir::pl::*;
-use crate::semantic::context::TableDecl;
+
 use crate::semantic::{static_analysis, NS_PARAM};
 use crate::utils::IdGenerator;
 use crate::{Error, Span, WithErrorInfo};
 
-use super::context::{Context, Decl, DeclKind, TableExpr};
+use super::context::{Context, Decl, DeclKind};
 use super::module::Module;
 use super::{NS_DEFAULT_DB, NS_INFER, NS_STD, NS_THAT, NS_THIS};
 use flatten::Flattener;
@@ -171,9 +171,11 @@ impl Resolver {
         input_id: usize,
     ) -> Ty {
         let table_decl = self.context.root_mod.get(table_fq).unwrap();
-        let TableDecl { ty, .. } = table_decl.kind.as_table_decl().unwrap();
+        let table_decl = table_decl.kind.as_expr().unwrap();
 
-        let inner = ty.as_ref().and_then(|t| t.as_relation()).cloned();
+        let inner = (table_decl.ty.as_ref())
+            .and_then(|t| t.as_relation())
+            .cloned();
         let inner = inner.unwrap_or_else(|| TyTuple {
             fields: Vec::new(),
             has_other: true,
@@ -211,8 +213,8 @@ impl Resolver {
         let infer_default = default_db.get(&Ident::from_name(NS_INFER)).unwrap().clone();
         let mut infer_default = *infer_default.kind.into_infer().unwrap();
 
-        let table_decl = infer_default.as_table_decl_mut().unwrap();
-        table_decl.expr = TableExpr::None;
+        let table_decl = infer_default.as_expr_mut().unwrap();
+        table_decl.kind = ExprKind::Literal(Literal::Null);
 
         if let Some(fields) = columns {
             table_decl.ty = Some(Ty::relation(TyTuple {
@@ -286,36 +288,38 @@ impl PlFold for Resolver {
                         ..node
                     },
 
-                    DeclKind::TableDecl(_) => {
-                        let input_name = ident.name.clone();
+                    DeclKind::Expr(expr) => {
+                        if expr.ty.as_ref().map_or(false, |x| x.is_relation()) {
+                            let input_name = ident.name.clone();
 
-                        let ty = self.create_ty_instance_of_table(&fq_ident, input_name, id);
+                            let ty = self.create_ty_instance_of_table(&fq_ident, input_name, id);
 
-                        Expr {
-                            kind: ExprKind::Ident(fq_ident),
-                            ty: Some(ty),
-                            ..node
+                            Expr {
+                                kind: ExprKind::Ident(fq_ident),
+                                ty: Some(ty),
+                                ..node
+                            }
+                        } else {
+                            match &expr.kind {
+                                ExprKind::Func(closure) => {
+                                    let closure = self.fold_function_types(*closure.clone())?;
+
+                                    let expr = Expr::new(ExprKind::Func(Box::new(closure)));
+
+                                    if self.in_func_call_name {
+                                        expr
+                                    } else {
+                                        self.fold_expr(expr)?
+                                    }
+                                }
+                                _ => self.fold_expr(expr.as_ref().clone())?,
+                            }
                         }
                     }
 
-                    DeclKind::Expr(expr) => match &expr.kind {
-                        ExprKind::Func(closure) => {
-                            let closure = self.fold_function_types(*closure.clone())?;
-
-                            let expr = Expr::new(ExprKind::Func(Box::new(closure)));
-
-                            if self.in_func_call_name {
-                                expr
-                            } else {
-                                self.fold_expr(expr)?
-                            }
-                        }
-                        _ => self.fold_expr(expr.as_ref().clone())?,
-                    },
-
                     DeclKind::InstanceOf { table_fq, lineage } => {
                         let decl = self.context.root_mod.get(table_fq).unwrap();
-                        let decl = decl.kind.as_table_decl().unwrap();
+                        let decl = decl.kind.as_expr().unwrap();
                         let mut ty = *decl.ty.clone().unwrap().kind.into_array().unwrap();
 
                         ty.instance_of = Some(table_fq.clone());
@@ -983,7 +987,7 @@ pub(super) mod test {
     fn parse_and_resolve(query: &str) -> Result<Expr> {
         let ctx = crate::semantic::test::parse_and_resolve(query)?;
         let (main, _) = ctx.find_main_rel(&[]).unwrap();
-        Ok(*main.clone().into_relation_var().unwrap())
+        Ok(main.clone())
     }
 
     fn resolve_ty(query: &str) -> Result<Ty> {

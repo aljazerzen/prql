@@ -6,7 +6,7 @@ use itertools::Itertools;
 use prqlc_ast::expr::Ident;
 
 use crate::ir::pl::{Annotation, Expr, ExprKind, Ty, TyKind};
-use crate::semantic::context::{Decl, DeclKind, TableDecl, TableExpr};
+use crate::semantic::context::{Decl, DeclKind};
 use crate::semantic::{Context, Module, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS};
 use crate::{Error, WithErrorInfo};
 
@@ -44,10 +44,11 @@ impl Context {
             Some(ty) if ty.is_relation() => {
                 let mut ty = ty.clone();
                 ty.flatten_tuples();
-                let ty = Some(ty);
 
-                let expr = TableExpr::RelationVar(value);
-                DeclKind::TableDecl(TableDecl { expr, ty })
+                let mut value = value;
+                value.ty = Some(ty);
+
+                DeclKind::Expr(value)
             }
             _ => DeclKind::Expr(value),
         }
@@ -185,7 +186,7 @@ impl Context {
 
         let (instance_of, _) = mod_decl.kind.as_instance_of().unwrap();
         let decl = self.root_mod.get(instance_of).unwrap();
-        let decl = decl.kind.as_table_decl().unwrap();
+        let decl = decl.kind.as_expr().unwrap();
 
         let tuple = decl.ty.as_ref().unwrap().as_relation().unwrap();
 
@@ -223,7 +224,7 @@ impl Context {
 
     fn infer_table_column(&mut self, table_ident: &Ident, col_name: &str) -> Result<(), String> {
         let table = self.root_mod.get_mut(table_ident).unwrap();
-        let table_decl = table.kind.as_table_decl_mut().unwrap();
+        let table_decl = table.kind.as_expr_mut().unwrap();
 
         let Some(ty_tuple) = table_decl.ty.as_mut().and_then(|t| t.as_relation_mut()) else {
             return Err(format!("Variable {table_ident:?} is not a relation."));
@@ -245,17 +246,15 @@ impl Context {
         ty_tuple.fields.push((Some(col_name.to_string()), ty));
 
         // also add into input tables of this table expression
-        if let TableExpr::RelationVar(expr) = &table_decl.expr {
-            if let Some(ty) = &expr.ty {
-                if let Some(tuple) = ty.as_relation() {
-                    if tuple.has_other {
-                        todo!("column inference")
-                        // let (wildcard_ty, _) = wildcard_inputs.into_iter().next().unwrap();
-                        // let wildcard_ty = wildcard_ty.as_ref().unwrap();
-                        // let table_fq = wildcard_ty.instance_of.clone().unwrap();
+        if let Some(ty) = &table_decl.ty {
+            if let Some(tuple) = ty.as_relation() {
+                if tuple.has_other {
+                    todo!("column inference")
+                    // let (wildcard_ty, _) = wildcard_inputs.into_iter().next().unwrap();
+                    // let wildcard_ty = wildcard_ty.as_ref().unwrap();
+                    // let table_fq = wildcard_ty.instance_of.clone().unwrap();
 
-                        // self.infer_table_column(&table_fq, col_name)?;
-                    }
+                    // self.infer_table_column(&table_fq, col_name)?;
                 }
             }
         }
