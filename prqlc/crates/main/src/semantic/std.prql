@@ -70,50 +70,50 @@ type transform = (func relation -> relation)
 ## Relational transforms
 let from = func
   `default_db.source` <relation>
-  -> <relation> internal from
+  -> <relation> `default_db.source`
 
 let select = func
   columns <any || tuple>
   tbl <relation>
-  -> <relation> internal select
+  -> <relation> internal std.select
 
 let filter = func
   condition <bool>
   tbl <relation>
-  -> <relation> internal filter
+  -> <relation> internal std.filter
 
 let derive = func
   columns <any || tuple>
   tbl <relation>
-  -> <relation> internal derive
+  -> <relation> internal std.derive
 
 let aggregate = func
   columns <any || tuple>
   tbl <relation>
-  -> <relation> internal aggregate
+  -> <relation> internal std.aggregate
 
 let sort = func
   by <any || tuple>
   tbl <relation>
-  -> <relation> internal sort
+  -> <relation> internal std.sort
 
 let take = func
   expr <scalar>
   tbl <relation>
-  -> <relation> internal take
+  -> <relation> internal std.take
 
 let join = func
   `default_db.with` <relation>
   condition <bool>
   `noresolve.side`:inner
   tbl <relation>
-  -> <relation> internal join
+  -> <relation> internal std.join
 
 let group = func
   by<scalar || tuple>
   pipeline <transform>
   tbl <relation>
-  -> <relation> internal group
+  -> <relation> internal std.group
 
 let window = func
   rows:0..0
@@ -122,9 +122,9 @@ let window = func
   rolling <int>:0
   pipeline <transform>
   tbl <relation>
-  -> <relation> internal window
+  -> <relation> internal std.window
 
-let append = `default_db.bottom`<relation> top<relation> -> <relation> internal append
+let append = `default_db.bottom`<relation> top<relation> -> <relation> internal std.append
 let intersect = `default_db.bottom`<relation> top<relation> -> <relation> (
   t = top
   join (b = bottom) (tuple_every (tuple_map _eq (tuple_zip t.* b.*)))
@@ -139,7 +139,7 @@ let remove = `default_db.bottom`<relation> top<relation> -> <relation> (
 let loop = func
   pipeline <transform>
   top <relation>
-  -> <relation> internal loop
+  -> <relation> internal std.loop
 
 ## Aggregate functions
 # These return either a scalar when used within `aggregate`, or a column when used anywhere else.

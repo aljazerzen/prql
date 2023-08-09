@@ -333,11 +333,16 @@ impl Command {
                 semantic::load_std_lib(sources);
 
                 let ast = prql_to_pl_tree(sources)?;
-                let ir = pl_to_rq_tree(ast, &main_path)?;
+                let root_mod = prqlc_main::semantic::resolve(ast, Default::default())?;
+                let (sm_expr, _) = prqlc_main::semantic::compile_to_sm(root_mod, &main_path)?;
 
                 match format {
-                    Format::Json => serde_json::to_string_pretty(&ir)?.into_bytes(),
-                    Format::Yaml => serde_yaml::to_string(&ir)?.into_bytes(),
+                    Format::Json => serde_json::to_string_pretty(&sm_expr)?.into_bytes(),
+                    Format::Yaml => {
+                        let json = serde_json::to_string_pretty(&sm_expr)?.into_bytes();
+                        let value: serde_yaml::Value = serde_json::from_slice(&json).unwrap();
+                        serde_yaml::to_string(&value)?.into_bytes()
+                    }
                 }
             }
             Command::SQLCompile {

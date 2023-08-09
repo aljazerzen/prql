@@ -22,11 +22,6 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
     let internal_name = closure.body.kind.as_internal().unwrap();
 
     let (kind, input) = match internal_name.as_str() {
-        "from" => {
-            let [source] = unpack::<1>(closure);
-
-            return Ok(source);
-        }
         "select" => {
             let [assigns, tbl] = unpack::<2>(closure);
 

@@ -51,7 +51,7 @@ impl SmCompiler {
 
     fn compile_expr(&mut self, expr: pl::Expr) -> Result<sm::EId> {
         let kind = match expr.kind {
-            pl::ExprKind::Ident(_) => todo!(),
+            pl::ExprKind::Ident(ident) => todo!("ident: {ident}"),
             pl::ExprKind::Literal(lit) => sm::ExprKind::Literal(lit),
 
             pl::ExprKind::Tuple(fields) => sm::ExprKind::Tuple(self.compile_exprs(fields)?),

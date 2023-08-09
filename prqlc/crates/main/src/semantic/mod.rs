@@ -1,6 +1,7 @@
 //! Semantic resolver (name resolution, type checking and lowering to RQ)
 
 mod ast_expand;
+mod compile_sm;
 mod context;
 mod eval;
 mod lowering;
@@ -70,6 +71,13 @@ pub fn resolve(
     }
 
     Ok(resolver.context)
+}
+
+pub fn compile_to_sm(
+    context: Context,
+    main_path: &[String],
+) -> Result<(crate::ir::sm::RootExpr, Context)> {
+    compile_sm::compile_to_sm(context, main_path)
 }
 
 /// Preferred way of injecting std module.
