@@ -202,6 +202,7 @@ fn expand_func_param(value: prqlc_ast::expr::FuncParam) -> Result<pl::FuncParam>
         name: value.name,
         ty: value.ty.map(expand_ty_or_expr).transpose()?,
         default_value: value.default_value.map(expand_expr_box).transpose()?,
+        implicit_closure: None,
     })
 }
 

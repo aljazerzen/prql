@@ -154,8 +154,18 @@ pub struct FuncParam {
     pub ty: Option<TyOrExpr>,
 
     pub default_value: Option<Box<Expr>>,
+
+    pub implicit_closure: Option<Vec<String>>
 }
 
 pub type Range = generic::Range<Box<Expr>>;
 pub type InterpolateItem = generic::InterpolateItem<Expr>;
 pub type SwitchCase = generic::SwitchCase<Box<Expr>>;
+
+impl Func {
+    pub(crate) fn as_debug_name(&self) -> &str {
+        let ident = self.name_hint.as_ref();
+
+        ident.map(|n| n.name.as_str()).unwrap_or("<anonymous>")
+    }
+}

@@ -72,6 +72,7 @@ let from = func
   `default_db.source` <relation>
   -> <relation> `default_db.source`
 
+@(implicit_closure on:0 param_names:[this])
 let select = func
   columns <any || tuple>
   tbl <relation>
@@ -82,6 +83,7 @@ let filter = func
   tbl <relation>
   -> <relation> internal std.filter
 
+@(implicit_closure on:0 param_names:[this])
 let derive = func
   columns <any || tuple>
   tbl <relation>
@@ -165,7 +167,7 @@ let concat_array = column <array> -> <text> internal std.concat_array
 let count = column<array> -> <int> internal std.count
 
 # Deprecated in favour of filterning input to the [std.count] function (not yet implemented).
-@{deprecated}
+@deprecated
 let count_distinct = column <array> -> internal std.count_distinct
 
 ## Window functions

@@ -397,8 +397,9 @@ fn new_func(name: &str, params: &[&str]) -> Expr {
         .iter()
         .map(|name| FuncParam {
             name: name.to_string(),
-            default_value: None,
             ty: None,
+            default_value: None,
+            implicit_closure: None,
         })
         .collect();
 

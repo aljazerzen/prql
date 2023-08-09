@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::iter::zip;
 
 use anyhow::Result;
-use itertools::{Itertools, Position};
+use itertools::Itertools;
 
 use crate::ir::pl::*;
 
@@ -274,10 +274,10 @@ impl PlFold for Resolver {
                 log::debug!("resolving ident {ident}...");
                 let fq_ident = self.resolve_ident(&ident).with_span(node.span)?;
                 log::debug!("... resolved to {fq_ident}");
-                let entry = self.context.root_mod.get(&fq_ident).unwrap();
-                log::debug!("... which is {entry}");
+                let decl = self.context.root_mod.get(&fq_ident).unwrap();
+                log::debug!("... which is {decl}");
 
-                match &entry.kind {
+                match &decl.kind {
                     DeclKind::Infer(_) => Expr {
                         kind: ExprKind::Ident(fq_ident),
                         ..node
@@ -289,6 +289,12 @@ impl PlFold for Resolver {
                     },
 
                     DeclKind::Expr(expr) => {
+                        let mut expr = *expr.clone();
+
+                        for annotation in &decl.annotations {
+                            apply_annotation(&mut expr, &annotation.expr)?;
+                        }
+
                         if expr.ty.as_ref().map_or(false, |x| x.is_relation()) {
                             let input_name = ident.name.clone();
 
@@ -300,9 +306,9 @@ impl PlFold for Resolver {
                                 ..node
                             }
                         } else {
-                            match &expr.kind {
+                            match expr.kind {
                                 ExprKind::Func(closure) => {
-                                    let closure = self.fold_function_types(*closure.clone())?;
+                                    let closure = self.fold_function_types(*closure)?;
 
                                     let expr = Expr::new(ExprKind::Func(Box::new(closure)));
 
@@ -312,7 +318,7 @@ impl PlFold for Resolver {
                                         self.fold_expr(expr)?
                                     }
                                 }
-                                _ => self.fold_expr(expr.as_ref().clone())?,
+                                _ => self.fold_expr(expr)?,
                             }
                         }
                     }
@@ -664,87 +670,18 @@ impl Resolver {
     /// Resolves function arguments. Will return `Err(func)` is partial application is required.
     fn resolve_function_args(&mut self, to_resolve: Func) -> Result<Result<Func, Func>> {
         let mut closure = Func {
-            args: vec![Expr::new(Literal::Null); to_resolve.args.len()],
+            args: Vec::with_capacity(to_resolve.args.len()),
             ..to_resolve
         };
         let mut partial_application_position = None;
 
         let func_name = &closure.name_hint;
 
-        let (relations, other): (Vec<_>, Vec<_>) = zip(&closure.params, to_resolve.args)
-            .enumerate()
-            .partition(|(_, (param, _))| {
-                let is_relation = param
-                    .ty
-                    .as_ref()
-                    .and_then(|t| t.as_ty())
-                    .map(|t| t.is_relation())
-                    .unwrap_or_default();
-
-                is_relation
-            });
-
-        let has_relations = !relations.is_empty();
-
         // resolve relational args
-        if has_relations {
-            self.context.root_mod.shadow(NS_THIS);
-            self.context.root_mod.shadow(NS_THAT);
 
-            for (pos, (index, (param, mut arg))) in relations.into_iter().with_position() {
-                let is_last = matches!(pos, Position::Last | Position::Only);
-
-                // just fold the argument alone
-                if partial_application_position.is_none() {
-                    arg = self
-                        .fold_and_type_check(arg, param, func_name)?
-                        .unwrap_or_else(|a| {
-                            partial_application_position = Some(index);
-                            a
-                        });
-                }
-                log::debug!("resolved arg to {}", arg.kind.as_ref());
-
-                // add relation frame into scope
-                if partial_application_position.is_none() {
-                    if is_last {
-                        self.context.root_mod.insert_relation(&arg, NS_THIS);
-                    } else {
-                        self.context.root_mod.insert_relation(&arg, NS_THAT);
-                    }
-                }
-
-                closure.args[index] = arg;
-            }
-        }
-
-        // resolve other positional
-        for (index, (param, mut arg)) in other {
+        for (index, (param, mut arg)) in zip(&closure.params, to_resolve.args).enumerate() {
+            // just fold the argument alone
             if partial_application_position.is_none() {
-                if let ExprKind::Tuple(fields) = arg.kind {
-                    // if this is a tuple, resolve elements separately,
-                    // so they can be added to scope, before resolving subsequent elements.
-
-                    let mut fields_new = Vec::with_capacity(fields.len());
-                    for field in fields {
-                        let field = self.fold_within_namespace(field, &param.name)?;
-
-                        // add aliased columns into scope
-                        if let Some(alias) = field.alias.clone() {
-                            let ty = field.ty.clone().unwrap();
-                            self.context
-                                .root_mod
-                                .insert_relation_col(NS_THIS, alias, ty);
-                        }
-                        fields_new.push(field);
-                    }
-
-                    // note that this tuple node has to be resolved itself
-                    // (it's elements are already resolved and so their resolving
-                    // should be skipped)
-                    arg.kind = ExprKind::Tuple(fields_new);
-                }
-
                 arg = self
                     .fold_and_type_check(arg, param, func_name)?
                     .unwrap_or_else(|a| {
@@ -752,13 +689,9 @@ impl Resolver {
                         a
                     });
             }
+            log::debug!("resolved arg to {}", arg.kind.as_ref());
 
-            closure.args[index] = arg;
-        }
-
-        if has_relations {
-            self.context.root_mod.unshadow(NS_THIS);
-            self.context.root_mod.unshadow(NS_THAT);
+            closure.args.push(arg);
         }
 
         Ok(if let Some(position) = partial_application_position {
@@ -779,6 +712,27 @@ impl Resolver {
         param: &FuncParam,
         func_name: &Option<Ident>,
     ) -> Result<Result<Expr, Expr>> {
+        if let Some(param_names) = &param.implicit_closure {
+            let arg = Expr::new(Func {
+                name_hint: None,
+                return_ty: param.ty.clone(),
+                body: Box::new(arg),
+                params: param_names
+                    .iter()
+                    .map(|name| FuncParam {
+                        name: name.clone(),
+                        ty: None,
+                        default_value: None,
+                        implicit_closure: None,
+                    })
+                    .collect_vec(),
+                named_params: Vec::new(),
+                args: Vec::new(),
+                env: Default::default(),
+            });
+            return Ok(Ok(self.fold_expr(arg)?));
+        }
+
         let mut arg = self.fold_within_namespace(arg, &param.name)?;
 
         // don't validate types of unresolved exprs
@@ -916,6 +870,7 @@ fn extract_partial_application(mut func: Func, position: usize) -> Func {
             name: param_name,
             ty: None,
             default_value: None,
+            implicit_closure: None,
         }],
         named_params: Default::default(),
         args: Default::default(),
@@ -960,6 +915,43 @@ fn get_stdlib_decl(name: &str) -> Option<ExprKind> {
         _ => return None,
     };
     Some(ExprKind::Type(Ty::new(set)))
+}
+
+fn apply_annotation(value: &mut Expr, annotation: &Expr) -> Result<()> {
+    if let ExprKind::FuncCall(call) = &annotation.kind {
+        match call.name.kind.as_ident().map_or("", |x| x.name.as_str()) {
+            "implicit_closure" => {
+                let on = (call.named_args.get("on"))
+                    .and_then(|x| x.kind.as_literal())
+                    .and_then(|x| x.as_integer())
+                    .ok_or_else(|| {
+                        Error::new_simple("param `on` expected an integer")
+                            .with_span(annotation.span)
+                    })?
+                    .clone();
+
+                let param_names: Vec<String> = (call.named_args.get("param_names"))
+                    .and_then(|x| x.kind.as_array())
+                    .and_then(|ar| {
+                        ar.iter()
+                            .map(|e| e.kind.as_ident().map(|i| i.name.clone()))
+                            .collect::<Option<Vec<String>>>()
+                    })
+                    .ok_or_else(|| {
+                        Error::new_simple("param `param_names` expected an array of names")
+                            .with_span(annotation.span)
+                    })?;
+
+                if let ExprKind::Func(func) = &mut value.kind {
+                    if let Some(param) = func.params.get_mut(on as usize) {
+                        param.implicit_closure = Some(param_names);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -496,6 +496,7 @@ fn fold_by_simulating_eval(
             name: param_id.to_string(),
             ty: None,
             default_value: None,
+            implicit_closure: None,
         }],
         named_params: vec![],
 

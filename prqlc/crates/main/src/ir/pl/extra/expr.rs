@@ -22,14 +22,6 @@ pub enum TyOrExpr {
     Expr(Box<Expr>),
 }
 
-impl Func {
-    pub(crate) fn as_debug_name(&self) -> &str {
-        let ident = self.name_hint.as_ref();
-
-        ident.map(|n| n.name.as_str()).unwrap_or("<anonymous>")
-    }
-}
-
 pub type WindowFrame = crate::ir::generic::WindowFrame<Box<Expr>>;
 pub type ColumnSort = crate::ir::generic::ColumnSort<Box<Expr>>;
 
