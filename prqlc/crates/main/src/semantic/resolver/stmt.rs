@@ -1,12 +1,11 @@
+use anyhow::Result;
 use std::collections::HashMap;
 
-use anyhow::Result;
-
+use crate::ir::decl::{Decl, DeclKind, Module};
 use crate::ir::pl::*;
 use crate::{Error, WithErrorInfo};
 
 use super::{Resolver, NS_STD};
-use crate::ir::decl::{Decl, DeclKind, Module};
 
 impl Resolver {
     // entry point to the resolver
@@ -107,13 +106,28 @@ impl Resolver {
                 self.validate_expr_type(&mut def.value, expected_ty.as_ref(), &who)?;
             }
 
-            let decl = self.root_mod.prepare_expr_decl(def.value);
+            let decl = prepare_expr_decl(def.value);
 
             self.root_mod
                 .declare(ident, decl, stmt.id, stmt.annotations)
                 .with_span(stmt.span)?;
         }
         Ok(())
+    }
+}
+
+pub(super) fn prepare_expr_decl(value: Box<Expr>) -> DeclKind {
+    match &value.ty {
+        Some(ty) if ty.is_relation() => {
+            let mut ty = ty.clone();
+            ty.flatten_tuples();
+
+            let mut value = value;
+            value.ty = Some(ty);
+
+            DeclKind::Expr(value)
+        }
+        _ => DeclKind::Expr(value),
     }
 }
 

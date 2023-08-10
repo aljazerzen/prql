@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::Result;
 use prqlc_ast::stmt::QueryDef;
 
 use crate::ir::decl::*;
-use crate::ir::pl::{Expr, Ident, Ty, TyKind, TyTuple};
+use crate::ir::pl::{Annotation, Expr, Ident, Ty, TyKind, TyTuple};
 use crate::Error;
 
 use super::{
@@ -145,63 +145,6 @@ impl Module {
         }
 
         ns.names.get(&fq_ident.name)
-    }
-
-    pub fn lookup(&self, ident: &Ident) -> HashSet<Ident> {
-        fn lookup_in(module: &Module, ident: Ident) -> HashSet<Ident> {
-            let (prefix, ident) = ident.pop_front();
-
-            if let Some(ident) = ident {
-                if let Some(entry) = module.names.get(&prefix) {
-                    let redirected = match &entry.kind {
-                        DeclKind::Module(ns) => ns.lookup(&ident),
-                        DeclKind::LayeredModules(stack) => {
-                            let mut r = HashSet::new();
-                            for ns in stack.iter().rev() {
-                                r = ns.lookup(&ident);
-
-                                if !r.is_empty() {
-                                    break;
-                                }
-                            }
-                            r
-                        }
-                        _ => HashSet::new(),
-                    };
-
-                    return redirected
-                        .into_iter()
-                        .map(|i| Ident::from_name(&prefix) + i)
-                        .collect();
-                }
-            } else if let Some(decl) = module.names.get(&prefix) {
-                if let DeclKind::Module(inner) = &decl.kind {
-                    if inner.names.contains_key(NS_SELF) {
-                        return HashSet::from([Ident::from_path(vec![
-                            prefix,
-                            NS_SELF.to_string(),
-                        ])]);
-                    }
-                }
-
-                return HashSet::from([Ident::from_name(prefix)]);
-            }
-            HashSet::new()
-        }
-
-        log::trace!("lookup: {ident}");
-
-        let mut res = HashSet::new();
-
-        res.extend(lookup_in(self, ident.clone()));
-
-        for redirect in &self.redirects {
-            log::trace!("... following redirect {redirect}");
-            let r = lookup_in(self, redirect.clone() + ident.clone());
-            log::trace!("... result of redirect {redirect}: {r:?}");
-            res.extend(r);
-        }
-        res
     }
 
     pub(super) fn insert_relation(&mut self, expr: &Expr, namespace: &str) {
@@ -363,6 +306,28 @@ impl Module {
 }
 
 impl RootModule {
+    pub(super) fn declare(
+        &mut self,
+        ident: Ident,
+        decl: DeclKind,
+        id: Option<usize>,
+        annotations: Vec<Annotation>,
+    ) -> Result<()> {
+        let existing = self.module.get(&ident);
+        if existing.is_some() {
+            return Err(Error::new_simple(format!("duplicate declarations of {ident}")).into());
+        }
+
+        let decl = Decl {
+            kind: decl,
+            declared_at: id,
+            order: 0,
+            annotations,
+        };
+        self.module.insert(ident, decl).unwrap();
+        Ok(())
+    }
+
     /// Finds that main pipeline given a path to either main itself or its parent module.
     /// Returns main expr and fq ident of the decl.
     pub fn find_main_rel(&self, path: &[String]) -> Result<(&Expr, Ident), Option<String>> {
@@ -423,31 +388,18 @@ impl RootModule {
     pub fn find_mains(&self) -> Vec<Ident> {
         self.module.find_by_suffix(NS_MAIN)
     }
+
+    pub(super) fn find_std_type(&self, name: &str) -> Ty {
+        let ident = Ident::from_path(vec![NS_STD, name]);
+        let decl = self.module.get(&ident).unwrap().kind.as_expr().unwrap();
+        decl.kind.as_type().unwrap().clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ir::pl::{Expr, ExprKind, Literal};
-
-    // TODO: tests / docstrings for `stack_pop` & `stack_push` & `insert_frame`
-    #[test]
-    fn test_module() {
-        let mut module = Module::default();
-
-        let ident = Ident::from_name("test_name");
-        let expr: Expr = Expr::new(ExprKind::Literal(Literal::Integer(42)));
-        let decl: Decl = DeclKind::Expr(Box::new(expr)).into();
-
-        assert!(module.insert(ident.clone(), decl.clone()).is_ok());
-        assert_eq!(module.get(&ident).unwrap(), &decl);
-        assert_eq!(module.get_mut(&ident).unwrap(), &decl);
-
-        // Lookup
-        let lookup_result = module.lookup(&ident);
-        assert_eq!(lookup_result.len(), 1);
-        assert!(lookup_result.contains(&ident));
-    }
 
     #[test]
     fn test_module_shadow_unshadow() {

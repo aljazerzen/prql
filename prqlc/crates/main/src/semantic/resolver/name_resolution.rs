@@ -1,13 +1,12 @@
-use std::collections::HashSet;
-
 use anyhow::Result;
 use itertools::Itertools;
+use std::collections::HashSet;
 
 use prqlc_ast::expr::Ident;
 
 use crate::ir::decl::{Decl, DeclKind, Module, RootModule};
-use crate::ir::pl::{Annotation, Expr, ExprKind, Ty, TyKind};
-use crate::semantic::{NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS};
+use crate::ir::pl::{Expr, ExprKind, Ty, TyKind};
+use crate::semantic::{NS_INFER, NS_INFER_MODULE, NS_SELF, NS_THIS};
 use crate::{Error, WithErrorInfo};
 
 use super::Resolver;
@@ -36,49 +35,6 @@ impl Resolver {
 }
 
 impl RootModule {
-    pub(super) fn declare(
-        &mut self,
-        ident: Ident,
-        decl: DeclKind,
-        id: Option<usize>,
-        annotations: Vec<Annotation>,
-    ) -> Result<()> {
-        let existing = self.module.get(&ident);
-        if existing.is_some() {
-            return Err(Error::new_simple(format!("duplicate declarations of {ident}")).into());
-        }
-
-        let decl = Decl {
-            kind: decl,
-            declared_at: id,
-            order: 0,
-            annotations,
-        };
-        self.module.insert(ident, decl).unwrap();
-        Ok(())
-    }
-
-    pub(super) fn find_std_type(&self, name: &str) -> Ty {
-        let ident = Ident::from_path(vec![NS_STD, name]);
-        let decl = self.module.get(&ident).unwrap().kind.as_expr().unwrap();
-        decl.kind.as_type().unwrap().clone()
-    }
-
-    pub(super) fn prepare_expr_decl(&mut self, value: Box<Expr>) -> DeclKind {
-        match &value.ty {
-            Some(ty) if ty.is_relation() => {
-                let mut ty = ty.clone();
-                ty.flatten_tuples();
-
-                let mut value = value;
-                value.ty = Some(ty);
-
-                DeclKind::Expr(value)
-            }
-            _ => DeclKind::Expr(value),
-        }
-    }
-
     pub(super) fn resolve_ident(&mut self, ident: &Ident) -> Result<Ident, Error> {
         // special case: wildcard
         if ident.name.contains('*') {
@@ -94,7 +50,7 @@ impl RootModule {
         }
 
         // base case: direct lookup
-        let decls = self.module.lookup(ident);
+        let decls = lookup(&self.module, ident);
         match decls.len() {
             // no match: try match *
             0 => {}
@@ -129,7 +85,7 @@ impl RootModule {
         let infer_ident = ident.clone().with_name(name_replacement);
 
         // lookup of infer_ident
-        let mut decls = self.module.lookup(&infer_ident);
+        let mut decls = lookup(&self.module, &infer_ident);
 
         if decls.is_empty() {
             if let Some(parent) = infer_ident.clone().pop() {
@@ -137,7 +93,7 @@ impl RootModule {
                 let _ = self.resolve_ident_fallback(parent, NS_INFER_MODULE)?;
 
                 // module was successfully inferred, retry the lookup
-                decls = self.module.lookup(&infer_ident)
+                decls = lookup(&self.module, &infer_ident)
             }
         }
 
@@ -221,7 +177,7 @@ impl RootModule {
     fn find_module_of_wildcard(&self, wildcard_ident: &Ident) -> Result<Ident, String> {
         let mod_ident = wildcard_ident.clone().pop().unwrap() + Ident::from_name(NS_SELF);
 
-        let fq_mod_idents = self.module.lookup(&mod_ident);
+        let fq_mod_idents = lookup(&self.module, &mod_ident);
 
         // TODO: gracefully handle this
         Ok(fq_mod_idents.into_iter().exactly_one().unwrap())
@@ -268,6 +224,60 @@ impl RootModule {
     }
 }
 
+fn lookup(module: &Module, ident: &Ident) -> HashSet<Ident> {
+    log::trace!("lookup: {ident}");
+
+    let mut res = HashSet::new();
+
+    res.extend(lookup_in(module, ident.clone()));
+
+    for redirect in &module.redirects {
+        log::trace!("... following redirect {redirect}");
+        let r = lookup_in(module, redirect.clone() + ident.clone());
+        log::trace!("... result of redirect {redirect}: {r:?}");
+        res.extend(r);
+    }
+    res
+}
+
+fn lookup_in(module: &Module, ident: Ident) -> HashSet<Ident> {
+    let (prefix, ident) = ident.pop_front();
+
+    if let Some(ident) = ident {
+        if let Some(entry) = module.names.get(&prefix) {
+            let redirected = match &entry.kind {
+                DeclKind::Module(ns) => lookup(ns, &ident),
+                DeclKind::LayeredModules(stack) => {
+                    let mut r = HashSet::new();
+                    for ns in stack.iter().rev() {
+                        r = lookup(ns, &ident);
+
+                        if !r.is_empty() {
+                            break;
+                        }
+                    }
+                    r
+                }
+                _ => HashSet::new(),
+            };
+
+            return redirected
+                .into_iter()
+                .map(|i| Ident::from_name(&prefix) + i)
+                .collect();
+        }
+    } else if let Some(decl) = module.names.get(&prefix) {
+        if let DeclKind::Module(inner) = &decl.kind {
+            if inner.names.contains_key(NS_SELF) {
+                return HashSet::from([Ident::from_path(vec![prefix, NS_SELF.to_string()])]);
+            }
+        }
+
+        return HashSet::from([Ident::from_name(prefix)]);
+    }
+    HashSet::new()
+}
+
 fn ambiguous_error(idents: HashSet<Ident>, replace_name: Option<&String>) -> Error {
     let all_this = idents.iter().all(|d| d.starts_with_part(NS_THIS));
 
@@ -290,4 +300,30 @@ fn ambiguous_error(idents: HashSet<Ident>, replace_name: Option<&String>) -> Err
     chunks.sort();
     let hint = format!("could be any of: {}", chunks.join(", "));
     Error::new_simple("Ambiguous name").push_hint(hint)
+}
+
+#[cfg(test)]
+mod tests {
+    use prqlc_ast::expr::Literal;
+
+    use super::*;
+
+    // TODO: tests / docstrings for `stack_pop` & `stack_push` & `insert_frame`
+    #[test]
+    fn test_module() {
+        let mut module = Module::default();
+
+        let ident = Ident::from_name("test_name");
+        let expr: Expr = Expr::new(ExprKind::Literal(Literal::Integer(42)));
+        let decl: Decl = DeclKind::Expr(Box::new(expr)).into();
+
+        assert!(module.insert(ident.clone(), decl.clone()).is_ok());
+        assert_eq!(module.get(&ident).unwrap(), &decl);
+        assert_eq!(module.get_mut(&ident).unwrap(), &decl);
+
+        // Lookup
+        let lookup_result = lookup(&module, &ident);
+        assert_eq!(lookup_result.len(), 1);
+        assert!(lookup_result.contains(&ident));
+    }
 }
