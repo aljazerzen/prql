@@ -263,17 +263,17 @@ impl Command {
                 semantic::load_std_lib(sources);
                 let stmts = prql_to_pl_tree(sources)?;
 
-                let context = semantic::resolve(stmts, Default::default())
+                let module = semantic::resolve(stmts, Default::default())
                     .map_err(prqlc_main::downcast)
                     .map_err(|e| e.composed(sources))?;
 
                 let mut out = Vec::new();
                 for (source_id, source) in &sources.sources {
                     let source_id = source_id.to_str().unwrap().to_string();
-                    out.extend(label_references(&context, source_id, source.clone()));
+                    out.extend(label_references(&module, source_id, source.clone()));
                 }
 
-                out.extend(format!("\n{context:#?}\n").into_bytes());
+                out.extend(format!("\n{module:#?}\n").into_bytes());
                 out
             }
             Command::Debug(DebugCommand::Annotate(_)) => {

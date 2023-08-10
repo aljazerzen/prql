@@ -155,7 +155,7 @@ pub struct FuncParam {
 
     pub default_value: Option<Box<Expr>>,
 
-    pub implicit_closure: Option<Vec<String>>
+    pub implicit_closure: Option<Vec<String>>,
 }
 
 pub type Range = generic::Range<Box<Expr>>;

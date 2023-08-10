@@ -1,19 +1,42 @@
-use anyhow::Result;
-use enum_as_inner::EnumAsInner;
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug};
+use std::collections::{HashMap, HashSet};
 
-use super::*;
-use crate::ir::pl::*;
-use crate::Span;
+use enum_as_inner::EnumAsInner;
+use itertools::Itertools;
+use prqlc_ast::{expr::Ident, Span};
+use serde::{Deserialize, Serialize};
+
+use crate::semantic::write_pl;
+
+use super::pl;
 
 /// Context of the pipeline.
 #[derive(Default, Serialize, Deserialize, Clone)]
-pub struct Context {
+pub struct RootModule {
     /// Map of all accessible names (for each namespace)
-    pub(crate) root_mod: Module,
+    pub module: Module,
 
-    pub(crate) span_map: HashMap<usize, Span>,
+    pub span_map: HashMap<usize, Span>,
+}
+
+#[derive(Default, PartialEq, Serialize, Deserialize, Clone)]
+pub struct Module {
+    /// Names declared in this module. This is the important thing.
+    pub names: HashMap<String, Decl>,
+
+    /// List of relative paths to include in search path when doing lookup in
+    /// this module.
+    ///
+    /// Assuming we want to lookup `average`, which is in `std`. The root module
+    /// does not contain the `average`. So instead:
+    /// - look for `average` in root module and find nothing,
+    /// - follow redirects in root module,
+    /// - because of redirect `std`, so we look for `average` in `std`,
+    /// - there is `average` is `std`,
+    /// - result of the lookup is FQ ident `std.average`.
+    pub redirects: HashSet<Ident>,
+
+    /// A declaration that has been shadowed (overwritten) by this module.
+    pub shadowed: Option<Box<Decl>>,
 }
 
 /// A struct containing information about a single declaration.
@@ -30,7 +53,7 @@ pub struct Decl {
     pub order: usize,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub annotations: Vec<Annotation>,
+    pub annotations: Vec<pl::Annotation>,
 }
 
 /// The Declaration itself.
@@ -47,14 +70,14 @@ pub enum DeclKind {
         lineage: usize,
     },
 
-    Column(Ty),
+    Column(pl::Ty),
 
     /// Contains a default value to be created in parent namespace when NS_INFER is matched.
     Infer(Box<DeclKind>),
 
-    Expr(Box<Expr>),
+    Expr(Box<pl::Expr>),
 
-    QueryDef(QueryDef),
+    QueryDef(pl::QueryDef),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
@@ -62,7 +85,7 @@ pub struct TableDecl {
     /// This will always be `TyKind::Array(TyKind::Tuple)`.
     /// It is being preparing to be merged with [DeclKind::Expr].
     /// It used to keep track of columns.
-    pub ty: Option<Ty>,
+    pub ty: Option<pl::Ty>,
 
     pub expr: TableExpr,
 }
@@ -70,7 +93,7 @@ pub struct TableDecl {
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone, EnumAsInner)]
 pub enum TableExpr {
     /// In SQL, this is a CTE
-    RelationVar(Box<Expr>),
+    RelationVar(Box<pl::Expr>),
 
     /// Actual table in a database. In SQL it can be referred to by name.
     LocalTable,
@@ -82,72 +105,24 @@ pub enum TableExpr {
     Param(String),
 }
 
-#[derive(Clone, Eq, Debug, PartialEq, Serialize, Deserialize)]
-pub enum TableColumn {
-    Wildcard,
-    Single(Option<String>),
-}
+impl std::fmt::Debug for Module {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ds = f.debug_struct("Module");
 
-impl Context {
-    /// Finds that main pipeline given a path to either main itself or its parent module.
-    /// Returns main expr and fq ident of the decl.
-    pub fn find_main_rel(&self, path: &[String]) -> Result<(&Expr, Ident), Option<String>> {
-        let (decl, ident) = self.find_main(path)?;
-
-        let decl = (decl.kind.as_expr()).ok_or(Some(format!("{ident} is not an expression")))?;
-
-        Ok((decl, ident))
-    }
-
-    pub fn find_main(&self, path: &[String]) -> Result<(&Decl, Ident), Option<String>> {
-        let mut tried_idents = Vec::new();
-
-        // is path referencing the relational var directly?
-        if !path.is_empty() {
-            let ident = Ident::from_path(path.to_vec());
-            let decl = self.root_mod.get(&ident);
-
-            if let Some(decl) = decl {
-                return Ok((decl, ident));
-            } else {
-                tried_idents.push(ident.to_string());
-            }
+        if !self.redirects.is_empty() {
+            let redirects = self.redirects.iter().map(|x| x.to_string()).collect_vec();
+            ds.field("redirects", &redirects);
         }
 
-        // is path referencing the parent module?
-        {
-            let mut path = path.to_vec();
-            path.push(NS_MAIN.to_string());
-
-            let ident = Ident::from_path(path);
-            let decl = self.root_mod.get(&ident);
-
-            if let Some(decl) = decl {
-                return Ok((decl, ident));
-            } else {
-                tried_idents.push(ident.to_string());
-            }
+        if self.names.len() < 15 {
+            ds.field("names", &self.names);
+        } else {
+            ds.field("names", &format!("... {} entries ...", self.names.len()));
         }
-
-        Err(Some(format!(
-            "Expected a declaration at {}",
-            tried_idents.join(" or ")
-        )))
-    }
-
-    pub fn find_query_def(&self, main: &Ident) -> Option<&QueryDef> {
-        let ident = Ident {
-            path: main.path.clone(),
-            name: NS_QUERY_DEF.to_string(),
-        };
-
-        let decl = self.root_mod.get(&ident)?;
-        decl.kind.as_query_def()
-    }
-
-    /// Finds all main pipelines.
-    pub fn find_mains(&self) -> Vec<Ident> {
-        self.root_mod.find_by_suffix(NS_MAIN)
+        if let Some(shadowed) = &self.shadowed {
+            ds.field("shadowed", shadowed);
+        }
+        ds.finish()
     }
 }
 
@@ -157,9 +132,9 @@ impl Default for DeclKind {
     }
 }
 
-impl Debug for Context {
+impl std::fmt::Debug for RootModule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.root_mod.fmt(f)
+        self.module.fmt(f)
     }
 }
 

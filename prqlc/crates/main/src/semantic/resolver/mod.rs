@@ -10,19 +10,18 @@ use crate::semantic::{static_analysis, NS_PARAM};
 use crate::utils::IdGenerator;
 use crate::{Error, Span, WithErrorInfo};
 
-use super::context::{Context, Decl, DeclKind};
-use super::module::Module;
 use super::{NS_DEFAULT_DB, NS_INFER, NS_STD, NS_THAT, NS_THIS};
+use crate::ir::decl::{Decl, DeclKind, Module, RootModule};
 use flatten::Flattener;
 
-mod context_impl;
+mod name_resolution;
 mod flatten;
 mod transforms;
 mod type_resolver;
 
 /// Can fold (walk) over AST and for each function call or variable find what they are referencing.
 pub struct Resolver {
-    pub context: Context,
+    pub root_mod: RootModule,
 
     pub current_module_path: Vec<String>,
 
@@ -44,9 +43,9 @@ pub struct ResolverOptions {
 }
 
 impl Resolver {
-    pub fn new(context: Context, options: ResolverOptions) -> Self {
+    pub fn new(root_mod: RootModule, options: ResolverOptions) -> Self {
         Resolver {
-            context,
+            root_mod,
             options,
             current_module_path: Vec::new(),
             default_namespace: None,
@@ -61,7 +60,7 @@ impl Resolver {
         for mut stmt in stmts {
             stmt.id = Some(self.id.gen());
             if let Some(span) = stmt.span {
-                self.context.span_map.insert(stmt.id.unwrap(), span);
+                self.root_mod.span_map.insert(stmt.id.unwrap(), span);
             }
 
             let ident = Ident {
@@ -74,7 +73,7 @@ impl Resolver {
             let mut def = match stmt.kind {
                 StmtKind::QueryDef(d) => {
                     let decl = DeclKind::QueryDef(*d);
-                    self.context
+                    self.root_mod
                         .declare(ident, decl, stmt.id, Vec::new())
                         .with_span(stmt.span)?;
                     continue;
@@ -125,8 +124,8 @@ impl Resolver {
                         ..Default::default()
                     };
                     let ident = Ident::from_path(self.current_module_path.clone());
-                    self.context
-                        .root_mod
+                    self.root_mod
+                        .module
                         .insert(ident, decl)
                         .with_span(stmt.span)?;
 
@@ -154,9 +153,9 @@ impl Resolver {
                 self.validate_expr_type(&mut def.value, expected_ty.as_ref(), &who)?;
             }
 
-            let decl = self.context.prepare_expr_decl(def.value);
+            let decl = self.root_mod.prepare_expr_decl(def.value);
 
-            self.context
+            self.root_mod
                 .declare(ident, decl, stmt.id, stmt.annotations)
                 .with_span(stmt.span)?;
         }
@@ -170,7 +169,7 @@ impl Resolver {
         input_name: String,
         input_id: usize,
     ) -> Ty {
-        let table_decl = self.context.root_mod.get(table_fq).unwrap();
+        let table_decl = self.root_mod.module.get(table_fq).unwrap();
         let table_decl = table_decl.kind.as_expr().unwrap();
 
         let inner = (table_decl.ty.as_ref())
@@ -207,7 +206,7 @@ impl Resolver {
 
         // declare a new table in the `default_db` module
         let default_db_ident = Ident::from_name(NS_DEFAULT_DB);
-        let default_db = self.context.root_mod.get_mut(&default_db_ident).unwrap();
+        let default_db = self.root_mod.module.get_mut(&default_db_ident).unwrap();
         let default_db = default_db.kind.as_module_mut().unwrap();
 
         let infer_default = default_db.get(&Ident::from_name(NS_INFER)).unwrap().clone();
@@ -264,7 +263,7 @@ impl PlFold for Resolver {
         let span = node.span;
 
         if let Some(span) = span {
-            self.context.span_map.insert(id, span);
+            self.root_mod.span_map.insert(id, span);
         }
 
         log::trace!("folding expr {node:?}");
@@ -274,7 +273,7 @@ impl PlFold for Resolver {
                 log::debug!("resolving ident {ident}...");
                 let fq_ident = self.resolve_ident(&ident).with_span(node.span)?;
                 log::debug!("... resolved to {fq_ident}");
-                let decl = self.context.root_mod.get(&fq_ident).unwrap();
+                let decl = self.root_mod.module.get(&fq_ident).unwrap();
                 log::debug!("... which is {decl}");
 
                 match &decl.kind {
@@ -324,7 +323,7 @@ impl PlFold for Resolver {
                     }
 
                     DeclKind::InstanceOf { table_fq, lineage } => {
-                        let decl = self.context.root_mod.get(table_fq).unwrap();
+                        let decl = self.root_mod.module.get(table_fq).unwrap();
                         let decl = decl.kind.as_expr().unwrap();
                         let mut ty = *decl.ty.clone().unwrap().kind.into_array().unwrap();
 
@@ -476,23 +475,23 @@ pub(super) fn create_tuple_exclude(
 impl Resolver {
     pub fn resolve_ident(&mut self, ident: &Ident) -> Result<Ident, Error> {
         if let Some(default_namespace) = &self.default_namespace {
-            self.context.resolve_ident(ident, Some(default_namespace))
+            self.root_mod.resolve_ident(ident, Some(default_namespace))
         } else {
             // resolve ident relative to current module,
             // then to parent, then grandparent until root
             let mut ident = ident.clone().prepend(self.current_module_path.clone());
 
-            let mut res = self.context.resolve_ident(&ident, None);
+            let mut res = self.root_mod.resolve_ident(&ident, None);
             for _ in &self.current_module_path {
                 if res.is_ok() {
                     break;
                 }
                 ident = ident.pop_front().1.unwrap();
-                res = self.context.resolve_ident(&ident, None);
+                res = self.root_mod.resolve_ident(&ident, None);
             }
 
             if res.is_err() {
-                log::debug!("cannot resolve `{ident}` in context={:#?}", self.context);
+                log::debug!("cannot resolve `{ident}` in context={:#?}", self.root_mod);
             }
 
             res
@@ -532,7 +531,7 @@ impl Resolver {
 
         // push the env
         let closure_env = Module::from_exprs(closure.env);
-        self.context.root_mod.stack_push(NS_PARAM, closure_env);
+        self.root_mod.module.stack_push(NS_PARAM, closure_env);
         let closure = Func {
             env: HashMap::new(),
             ..closure
@@ -582,14 +581,14 @@ impl Resolver {
 
             let (func_env, body) = env_of_closure(closure);
 
-            self.context.root_mod.stack_push(NS_PARAM, func_env);
+            self.root_mod.module.stack_push(NS_PARAM, func_env);
 
             // fold again, to resolve inner variables & functions
             let body = self.fold_expr(body)?;
 
             // remove param decls
             log::debug!("stack_pop: {:?}", body.id);
-            let func_env = self.context.root_mod.stack_pop(NS_PARAM).unwrap();
+            let func_env = self.root_mod.module.stack_pop(NS_PARAM).unwrap();
 
             if let ExprKind::Func(mut inner_closure) = body.kind {
                 // body couldn't been resolved - construct a closure to be evaluated later
@@ -616,7 +615,7 @@ impl Resolver {
         };
 
         // pop the env
-        self.context.root_mod.stack_pop(NS_PARAM).unwrap();
+        self.root_mod.module.stack_pop(NS_PARAM).unwrap();
 
         Ok(Expr { span, ..res })
     }
@@ -795,8 +794,8 @@ impl Resolver {
     }
 
     fn fold_ty_or_expr(&mut self, ty_or_expr: Option<TyOrExpr>) -> Result<Option<TyOrExpr>> {
-        self.context.root_mod.shadow(NS_THIS);
-        self.context.root_mod.shadow(NS_THAT);
+        self.root_mod.module.shadow(NS_THIS);
+        self.root_mod.module.shadow(NS_THAT);
 
         let res = match ty_or_expr {
             Some(TyOrExpr::Expr(ty_expr)) => {
@@ -805,8 +804,8 @@ impl Resolver {
             _ => ty_or_expr,
         };
 
-        self.context.root_mod.unshadow(NS_THIS);
-        self.context.root_mod.unshadow(NS_THAT);
+        self.root_mod.module.unshadow(NS_THIS);
+        self.root_mod.module.unshadow(NS_THAT);
         Ok(res)
     }
 }

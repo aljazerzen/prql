@@ -3,25 +3,28 @@ use prqlc_ast::error::Error;
 use prqlc_ast::expr::Ident;
 
 use crate::ir::{pl, sm};
-use crate::semantic::Context;
+use crate::semantic::RootModule;
 use crate::WithErrorInfo;
 
-pub fn compile_to_sm(context: Context, main_path: &[String]) -> Result<(sm::RootExpr, Context)> {
+pub fn compile_to_sm(
+    root_mod: RootModule,
+    main_path: &[String],
+) -> Result<(sm::RootExpr, RootModule)> {
     // find main
     log::debug!("lookup for main pipeline in {main_path:?}");
-    let (_, main_ident) = context.find_main_rel(main_path).map_err(|hint| {
+    let (_, main_ident) = root_mod.find_main_rel(main_path).map_err(|hint| {
         Error::new_simple("Missing main pipeline")
             .with_code("E0001")
             .with_hints(hint)
     })?;
 
     // find & validate query def
-    // let def = context.find_query_def(&main_ident);
+    // let def = root_mod.find_query_def(&main_ident);
     // let def = def.cloned().unwrap_or_default();
     // validate query def
 
     let mut compiler = SmCompiler {
-        context,
+        root_mod,
         exprs: Vec::new(),
     };
 
@@ -31,17 +34,17 @@ pub fn compile_to_sm(context: Context, main_path: &[String]) -> Result<(sm::Root
         exprs: compiler.exprs,
     };
 
-    Ok((root_expr, compiler.context))
+    Ok((root_expr, compiler.root_mod))
 }
 
 struct SmCompiler {
-    context: Context,
+    root_mod: RootModule,
     exprs: Vec<sm::Expr>,
 }
 
 impl SmCompiler {
     fn compile_decl_as_expr(&mut self, ident: Ident) -> Result<sm::EId> {
-        let decl = self.context.root_mod.get(&ident).unwrap();
+        let decl = self.root_mod.module.get(&ident).unwrap();
 
         let expr = (decl.kind.as_expr())
             .ok_or_else(|| Error::new_simple(format!("expected `{ident}` to be an expression")))?;

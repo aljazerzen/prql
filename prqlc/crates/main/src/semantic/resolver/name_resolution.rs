@@ -5,12 +5,12 @@ use itertools::Itertools;
 
 use prqlc_ast::expr::Ident;
 
+use crate::ir::decl::{Decl, DeclKind, Module, RootModule};
 use crate::ir::pl::{Annotation, Expr, ExprKind, Ty, TyKind};
-use crate::semantic::context::{Decl, DeclKind};
-use crate::semantic::{Context, Module, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS};
+use crate::semantic::{NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS};
 use crate::{Error, WithErrorInfo};
 
-impl Context {
+impl RootModule {
     pub(super) fn declare(
         &mut self,
         ident: Ident,
@@ -18,7 +18,7 @@ impl Context {
         id: Option<usize>,
         annotations: Vec<Annotation>,
     ) -> Result<()> {
-        let existing = self.root_mod.get(&ident);
+        let existing = self.module.get(&ident);
         if existing.is_some() {
             return Err(Error::new_simple(format!("duplicate declarations of {ident}")).into());
         }
@@ -29,13 +29,13 @@ impl Context {
             order: 0,
             annotations,
         };
-        self.root_mod.insert(ident, decl).unwrap();
+        self.module.insert(ident, decl).unwrap();
         Ok(())
     }
 
     pub(super) fn find_std_type(&self, name: &str) -> Ty {
         let ident = Ident::from_path(vec![NS_STD, name]);
-        let decl = self.root_mod.get(&ident).unwrap().kind.as_expr().unwrap();
+        let decl = self.module.get(&ident).unwrap().kind.as_expr().unwrap();
         decl.kind.as_type().unwrap().clone()
     }
 
@@ -67,13 +67,13 @@ impl Context {
                 ));
             }
             return self.resolve_ident_wildcard(ident).map_err(|e| {
-                log::debug!("{:#?}", self.root_mod);
+                log::debug!("{:#?}", self.module);
                 Error::new_simple(e)
             });
         }
 
         // base case: direct lookup
-        let decls = self.root_mod.lookup(ident);
+        let decls = self.module.lookup(ident);
         match decls.len() {
             // no match: try match *
             0 => {}
@@ -88,7 +88,7 @@ impl Context {
         let ident = if let Some(default_namespace) = default_namespace {
             let ident = ident.clone().prepend(vec![default_namespace.clone()]);
 
-            let decls = self.root_mod.lookup(&ident);
+            let decls = self.module.lookup(&ident);
             match decls.len() {
                 // no match: try match *
                 0 => ident,
@@ -124,7 +124,7 @@ impl Context {
         let infer_ident = ident.clone().with_name(name_replacement);
 
         // lookup of infer_ident
-        let mut decls = self.root_mod.lookup(&infer_ident);
+        let mut decls = self.module.lookup(&infer_ident);
 
         if decls.is_empty() {
             if let Some(parent) = infer_ident.clone().pop() {
@@ -132,7 +132,7 @@ impl Context {
                 let _ = self.resolve_ident_fallback(parent, NS_INFER_MODULE)?;
 
                 // module was successfully inferred, retry the lookup
-                decls = self.root_mod.lookup(&infer_ident)
+                decls = self.module.lookup(&infer_ident)
             }
         }
 
@@ -150,7 +150,7 @@ impl Context {
 
     /// Create a declaration of [original] from template provided by declaration of [infer_ident].
     fn infer_decl(&mut self, infer_ident: Ident, original: &Ident) -> Result<Ident, String> {
-        let infer = self.root_mod.get(&infer_ident).unwrap();
+        let infer = self.module.get(&infer_ident).unwrap();
         let mut infer_default = *infer.kind.as_infer().cloned().unwrap();
 
         if let DeclKind::Module(new_module) = &mut infer_default {
@@ -161,7 +161,7 @@ impl Context {
         }
 
         let module_ident = infer_ident.pop().unwrap();
-        let module = self.root_mod.get_mut(&module_ident).unwrap();
+        let module = self.module.get_mut(&module_ident).unwrap();
         let module = module.kind.as_module_mut().unwrap();
 
         // insert default
@@ -182,10 +182,10 @@ impl Context {
 
     fn resolve_ident_wildcard(&mut self, ident: &Ident) -> Result<Ident, String> {
         let mod_ident = self.find_module_of_wildcard(ident)?;
-        let mod_decl = self.root_mod.get(&mod_ident).unwrap();
+        let mod_decl = self.module.get(&mod_ident).unwrap();
 
         let (instance_of, _) = mod_decl.kind.as_instance_of().unwrap();
-        let decl = self.root_mod.get(instance_of).unwrap();
+        let decl = self.module.get(instance_of).unwrap();
         let decl = decl.kind.as_expr().unwrap();
 
         let tuple = decl.ty.as_ref().unwrap().as_relation().unwrap();
@@ -205,7 +205,7 @@ impl Context {
 
         let cols_expr = DeclKind::Expr(Box::new(tuple_with_all_cols));
         let save_as = "_wildcard_match";
-        self.root_mod
+        self.module
             .names
             .insert(save_as.to_string(), cols_expr.into());
 
@@ -216,14 +216,14 @@ impl Context {
     fn find_module_of_wildcard(&self, wildcard_ident: &Ident) -> Result<Ident, String> {
         let mod_ident = wildcard_ident.clone().pop().unwrap() + Ident::from_name(NS_SELF);
 
-        let fq_mod_idents = self.root_mod.lookup(&mod_ident);
+        let fq_mod_idents = self.module.lookup(&mod_ident);
 
         // TODO: gracefully handle this
         Ok(fq_mod_idents.into_iter().exactly_one().unwrap())
     }
 
     fn infer_table_column(&mut self, table_ident: &Ident, col_name: &str) -> Result<(), String> {
-        let table = self.root_mod.get_mut(table_ident).unwrap();
+        let table = self.module.get_mut(table_ident).unwrap();
         let table_decl = table.kind.as_expr_mut().unwrap();
 
         let Some(ty_tuple) = table_decl.ty.as_mut().and_then(|t| t.as_relation_mut()) else {

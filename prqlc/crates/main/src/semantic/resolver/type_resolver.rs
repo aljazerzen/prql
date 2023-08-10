@@ -139,7 +139,7 @@ impl Resolver {
                 unreachable!()
             }
 
-            ExprKind::SString(_) => return Ok(Some(self.context.find_std_type("scalar"))),
+            ExprKind::SString(_) => return Ok(Some(self.root_mod.find_std_type("scalar"))),
             ExprKind::FString(_) => TyKind::Primitive(PrimitiveSet::Text),
 
             ExprKind::TransformCall(call) => return self.infer_type_of_transform(call).map(Some),
@@ -353,7 +353,7 @@ impl Resolver {
                 // propagate the inference to table declarations
                 // TODO: could this be unified with [Context::infer_decl]?
                 if let Some(instance_of) = instance_of {
-                    let _decl = self.context.root_mod.get(&instance_of).unwrap();
+                    let _decl = self.root_mod.module.get(&instance_of).unwrap();
 
                     // TODO
                 }
@@ -582,7 +582,7 @@ mod test {
         let root_mod = crate::semantic::resolve(ast, Default::default()).unwrap();
 
         let ident = Ident::from_name("x");
-        let decl = &root_mod.root_mod.get(&ident).unwrap().kind;
+        let decl = &root_mod.module.get(&ident).unwrap().kind;
 
         decl.as_expr().unwrap().kind.as_type().unwrap().clone()
     }

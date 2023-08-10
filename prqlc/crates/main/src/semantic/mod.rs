@@ -2,7 +2,6 @@
 
 mod ast_expand;
 mod compile_sm;
-mod context;
 mod eval;
 mod lowering;
 mod module;
@@ -14,13 +13,12 @@ use anyhow::Result;
 use itertools::Itertools;
 use std::path::PathBuf;
 
-pub use self::context::Context;
-pub use self::module::Module;
 use self::resolver::Resolver;
 pub use self::resolver::ResolverOptions;
 pub use eval::eval;
 pub use lowering::lower_to_ir;
 
+use crate::ir::decl::{Module, RootModule};
 use crate::ir::pl::{self, ModuleDef, Stmt, StmtKind, TypeDef, VarDef};
 use crate::ir::rq::Query;
 use crate::WithErrorInfo;
@@ -31,9 +29,9 @@ pub fn resolve_and_lower(
     file_tree: SourceTree<Vec<prqlc_ast::stmt::Stmt>>,
     main_path: &[String],
 ) -> Result<Query> {
-    let context = resolve(file_tree, Default::default())?;
+    let module = resolve(file_tree, Default::default())?;
 
-    let (query, _) = lowering::lower_to_ir(context, main_path)?;
+    let (query, _) = lowering::lower_to_ir(module, main_path)?;
     Ok(query)
 }
 
@@ -41,7 +39,7 @@ pub fn resolve_and_lower(
 pub fn resolve(
     mut file_tree: SourceTree<Vec<prqlc_ast::stmt::Stmt>>,
     options: ResolverOptions,
-) -> Result<Context> {
+) -> Result<RootModule> {
     // inject std module if it does not exist
     if !file_tree.sources.contains_key(&PathBuf::from("std.prql")) {
         let mut source_tree = SourceTree {
@@ -55,11 +53,11 @@ pub fn resolve(
     }
 
     // init empty context
-    let context = Context {
-        root_mod: Module::new_root(),
-        ..Context::default()
+    let root_mod = RootModule {
+        module: Module::new_root(),
+        ..RootModule::default()
     };
-    let mut resolver = Resolver::new(context, options);
+    let mut resolver = Resolver::new(root_mod, options);
 
     // resolve sources one by one
     // TODO: recursive references
@@ -70,14 +68,14 @@ pub fn resolve(
         resolver.fold_statements(stmts)?;
     }
 
-    Ok(resolver.context)
+    Ok(resolver.root_mod)
 }
 
 pub fn compile_to_sm(
-    context: Context,
+    root_module: RootModule,
     main_path: &[String],
-) -> Result<(crate::ir::sm::RootExpr, Context)> {
-    compile_sm::compile_to_sm(context, main_path)
+) -> Result<(crate::ir::sm::RootExpr, RootModule)> {
+    compile_sm::compile_to_sm(root_module, main_path)
 }
 
 /// Preferred way of injecting std module.
@@ -218,7 +216,7 @@ pub mod test {
     use crate::ir::rq::Query;
     use crate::parser::parse;
 
-    use super::{resolve, resolve_and_lower, Context};
+    use super::{resolve, resolve_and_lower, RootModule};
 
     pub fn parse_resolve_and_lower(query: &str) -> Result<Query> {
         let mut source_tree = query.into();
@@ -227,7 +225,7 @@ pub mod test {
         resolve_and_lower(parse(&source_tree)?, &[])
     }
 
-    pub fn parse_and_resolve(query: &str) -> Result<Context> {
+    pub fn parse_and_resolve(query: &str) -> Result<RootModule> {
         let mut source_tree = query.into();
         super::load_std_lib(&mut source_tree);
 

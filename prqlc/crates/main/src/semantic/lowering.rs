@@ -1,13 +1,13 @@
 use anyhow::Result;
 
-use super::context::Context;
+use crate::ir::decl::RootModule;
 use crate::ir::rq::Query;
 
 /// Convert AST into IR and make sure that:
 /// - transforms are not nested,
 /// - transforms have correct partition, window and sort set,
 /// - make sure there are no unresolved expressions.
-pub fn lower_to_ir(_context: Context, _main_path: &[String]) -> Result<(Query, Context)> {
+pub fn lower_to_ir(_module: RootModule, _main_path: &[String]) -> Result<(Query, RootModule)> {
     todo!();
 }
 

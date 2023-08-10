@@ -4,16 +4,14 @@ use anyhow::{anyhow, bail, Result};
 use itertools::Itertools;
 use serde::Deserialize;
 
+use crate::ir::decl::{Decl, DeclKind, Module};
 use crate::ir::generic::{SortDirection, WindowKind};
-use crate::ir::pl::PlFold;
 use crate::ir::pl::*;
 use crate::semantic::ast_expand::try_restrict_range;
 use crate::semantic::resolver::type_resolver::type_intersection;
 use crate::semantic::write_pl;
 use crate::{Error, Reason, WithErrorInfo};
 
-use super::super::context::{Decl, DeclKind};
-use super::super::module::Module;
 use super::Resolver;
 use super::NS_PARAM;
 
@@ -473,11 +471,11 @@ fn fold_by_simulating_eval(
     )));
 
     let env = Module::singleton(param_name, Decl::from(DeclKind::Column(param_ty)));
-    resolver.context.root_mod.stack_push(NS_PARAM, env);
+    resolver.root_mod.module.stack_push(NS_PARAM, env);
 
     let pipeline = resolver.fold_expr(pipeline)?;
 
-    resolver.context.root_mod.stack_pop(NS_PARAM).unwrap();
+    resolver.root_mod.module.stack_pop(NS_PARAM).unwrap();
 
     // now, we need wrap the result into a closure and replace
     // the dummy node with closure's parameter.
