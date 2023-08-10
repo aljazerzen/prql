@@ -75,6 +75,12 @@ pub enum ExprKind {
     /// Contains ident of the RQ operator.
     Internal(String),
 
+    /// A lookup into a structure (tuple or array).
+    Indirection {
+        expr: Box<Expr>,
+        name: String,
+    },
+
     /// Tuple fields, compounded together into an Expr, except actually being a tuple.
     /// Syntactically, this would be `a, b, c` (a tuple without braces).
     ///

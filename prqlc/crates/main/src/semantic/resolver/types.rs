@@ -272,6 +272,16 @@ impl Resolver {
                 }
             }
 
+            ExprKind::Indirection { expr, .. } => {
+                let Some(_) = self.infer_type(expr)? else {
+                    return Ok(None);
+                };
+                unreachable!(
+                    "this should never happen because ExprKind::Indirection is only
+                    construct by the resolver with also sets the expr ty"
+                )
+            }
+
             ExprKind::Func(func) => TyKind::Function(Some(TyFunc {
                 args: func
                     .params

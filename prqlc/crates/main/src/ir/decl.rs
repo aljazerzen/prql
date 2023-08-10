@@ -77,6 +77,8 @@ pub enum DeclKind {
 
     Expr(Box<pl::Expr>),
 
+    Param(Box<pl::Ty>),
+
     QueryDef(pl::QueryDef),
 }
 
@@ -167,6 +169,7 @@ impl std::fmt::Display for DeclKind {
             Self::Column(arg0) => write!(f, "Column (target {arg0})"),
             Self::Infer(arg0) => write!(f, "Infer (default: {arg0})"),
             Self::Expr(arg0) => write!(f, "Expr: {}", write_pl(*arg0.clone())),
+            Self::Param(arg0) => write!(f, "Param: {arg0}"),
             Self::QueryDef(_) => write!(f, "QueryDef"),
         }
     }

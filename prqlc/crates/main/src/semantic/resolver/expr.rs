@@ -4,15 +4,11 @@ use prqlc_ast::Span;
 
 use crate::ir::decl::Decl;
 use crate::ir::pl::*;
-use crate::semantic::static_analysis;
-use crate::semantic::NS_DEFAULT_DB;
-use crate::semantic::NS_INFER;
-use crate::semantic::NS_THIS;
-use crate::{Error, WithErrorInfo};
+use crate::semantic::{write_pl, NS_DEFAULT_DB, NS_INFER, NS_THIS};
+use crate::WithErrorInfo;
 
 use super::flatten::Flattener;
 use super::Resolver;
-use crate::ir::decl::DeclKind;
 
 impl PlFold for Resolver {
     fn fold_stmts(&mut self, _: Vec<Stmt>) -> Result<Vec<Stmt>> {
@@ -20,15 +16,11 @@ impl PlFold for Resolver {
     }
 
     fn fold_var_def(&mut self, var_def: VarDef) -> Result<VarDef> {
-        let value = if matches!(var_def.value.kind, ExprKind::Func(_)) {
-            var_def.value
-        } else {
-            Box::new(Flattener::fold(self.fold_expr(*var_def.value)?))
-        };
+        let value = Flattener::fold(self.fold_expr(*var_def.value)?);
 
         Ok(VarDef {
             name: var_def.name,
-            value,
+            value: Box::new(value),
             ty_expr: fold_optional_box(self, var_def.ty_expr)?,
             kind: var_def.kind,
         })
@@ -52,76 +44,13 @@ impl PlFold for Resolver {
         let r = match node.kind {
             ExprKind::Ident(ident) => {
                 log::debug!("resolving ident {ident}...");
-                let fq_ident = self.resolve_ident(&ident).with_span(node.span)?;
-                log::debug!("... resolved to {fq_ident}");
-                let decl = self.root_mod.module.get(&fq_ident).unwrap();
-                log::debug!("... which is {decl}");
+                let (ty, kind) = self.resolve_ident(&ident).with_span(node.span)?;
+                log::debug!("... to {}", write_pl(Expr::new(kind.clone())));
 
-                match &decl.kind {
-                    DeclKind::Infer(_) => Expr {
-                        kind: ExprKind::Ident(fq_ident),
-                        ..node
-                    },
-                    DeclKind::Column(ty) => Expr {
-                        kind: ExprKind::Ident(fq_ident),
-                        ty: Some(ty.clone()),
-                        ..node
-                    },
-
-                    DeclKind::Expr(expr) => {
-                        let mut expr = *expr.clone();
-
-                        for annotation in &decl.annotations {
-                            apply_annotation(&mut expr, &annotation.expr)?;
-                        }
-
-                        if expr.ty.as_ref().map_or(false, |x| x.is_relation()) {
-                            let input_name = ident.name.clone();
-
-                            let ty = self.create_ty_instance_of_table(&fq_ident, input_name, id);
-
-                            Expr {
-                                kind: ExprKind::Ident(fq_ident),
-                                ty: Some(ty),
-                                ..node
-                            }
-                        } else {
-                            match expr.kind {
-                                ExprKind::Func(closure) => {
-                                    let closure = self.resolve_function_types(*closure)?;
-
-                                    let expr = Expr::new(ExprKind::Func(Box::new(closure)));
-
-                                    if self.in_func_call_name {
-                                        expr
-                                    } else {
-                                        self.fold_expr(expr)?
-                                    }
-                                }
-                                _ => self.fold_expr(expr)?,
-                            }
-                        }
-                    }
-
-                    DeclKind::InstanceOf { table_fq, lineage } => {
-                        let decl = self.root_mod.module.get(table_fq).unwrap();
-                        let decl = decl.kind.as_expr().unwrap();
-                        let mut ty = *decl.ty.clone().unwrap().kind.into_array().unwrap();
-
-                        ty.instance_of = Some(table_fq.clone());
-                        ty.lineage = Some(*lineage);
-
-                        Expr {
-                            kind: ExprKind::Ident(fq_ident),
-                            ty: Some(ty),
-                            ..node
-                        }
-                    }
-
-                    d => {
-                        // ident must provide the type of the expr
-                        unreachable!("{d}")
-                    }
+                Expr {
+                    kind,
+                    ty: Some(ty.clone()),
+                    ..node
                 }
             }
 
@@ -137,7 +66,7 @@ impl PlFold for Resolver {
                     span,
                     ..Expr::new(ExprKind::Tuple(vec![this_fields]))
                 };
-                let this = self.fold_expr(this)?;
+                let this = self.fold_expr(this).with_span(span)?;
 
                 let exclude_tuple = args.into_iter().exactly_one().unwrap();
                 let exclude_tuple = self.fold_expr(exclude_tuple)?;
@@ -153,7 +82,7 @@ impl PlFold for Resolver {
                 // fold function name
                 let old = self.in_func_call_name;
                 self.in_func_call_name = true;
-                let name = self.fold_expr(*name)?;
+                let name = self.fold_expr(*name).with_span(span)?;
                 self.in_func_call_name = old;
 
                 let func = *name.try_cast(|n| n.into_func(), None, "a function")?;
@@ -166,7 +95,7 @@ impl PlFold for Resolver {
             ExprKind::Func(closure) => self.fold_function(*closure, span)?,
 
             ExprKind::Tuple(exprs) => {
-                let exprs = self.fold_exprs(exprs)?;
+                let exprs = self.fold_exprs(exprs).with_span(span)?;
 
                 // flatten
                 let mut flattened = Vec::with_capacity(exprs.len());
@@ -184,7 +113,7 @@ impl PlFold for Resolver {
             }
 
             ExprKind::Array(exprs) => {
-                let mut exprs = self.fold_exprs(exprs)?;
+                let mut exprs = self.fold_exprs(exprs).with_span(span)?;
 
                 // validate that all elements have the same type
                 let mut expected_ty: Option<&Ty> = None;
@@ -205,11 +134,13 @@ impl PlFold for Resolver {
             }
 
             item => Expr {
-                kind: fold_expr_kind(self, item)?,
+                kind: fold_expr_kind(self, item).with_span(span)?,
                 ..node
             },
         };
-        let mut r = static_analysis::static_analysis(r);
+        let mut r = r;
+        r.id = r.id.or(Some(id));
+        let mut r = self.static_eval(r)?;
         r.id = r.id.or(Some(id));
         r.alias = r.alias.or(alias);
         r.span = r.span.or(span);
@@ -322,41 +253,4 @@ pub(super) fn create_tuple_exclude(
         span,
         ..Expr::new(ExprKind::TupleExclude { expr, exclude })
     })
-}
-
-fn apply_annotation(value: &mut Expr, annotation: &Expr) -> Result<()> {
-    if let ExprKind::FuncCall(call) = &annotation.kind {
-        match call.name.kind.as_ident().map_or("", |x| x.name.as_str()) {
-            "implicit_closure" => {
-                let on = (call.named_args.get("on"))
-                    .and_then(|x| x.kind.as_literal())
-                    .and_then(|x| x.as_integer())
-                    .ok_or_else(|| {
-                        Error::new_simple("param `on` expected an integer")
-                            .with_span(annotation.span)
-                    })?
-                    .clone();
-
-                let param_names: Vec<String> = (call.named_args.get("param_names"))
-                    .and_then(|x| x.kind.as_array())
-                    .and_then(|ar| {
-                        ar.iter()
-                            .map(|e| e.kind.as_ident().map(|i| i.name.clone()))
-                            .collect::<Option<Vec<String>>>()
-                    })
-                    .ok_or_else(|| {
-                        Error::new_simple("param `param_names` expected an array of names")
-                            .with_span(annotation.span)
-                    })?;
-
-                if let ExprKind::Func(func) = &mut value.kind {
-                    if let Some(param) = func.params.get_mut(on as usize) {
-                        param.implicit_closure = Some(param_names);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(())
 }

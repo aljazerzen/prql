@@ -287,6 +287,7 @@ fn restrict_exprs(exprs: Vec<pl::Expr>) -> Vec<Expr> {
 fn restrict_expr_kind(value: pl::ExprKind) -> ExprKind {
     match value {
         pl::ExprKind::Ident(v) => ExprKind::Ident(v),
+        pl::ExprKind::Indirection { expr, name } => restrict_indirection(*expr, name),
         pl::ExprKind::Literal(v) => ExprKind::Literal(v),
         pl::ExprKind::Array(v) => ExprKind::Array(restrict_exprs(v)),
         pl::ExprKind::Tuple(v) => ExprKind::Tuple(restrict_exprs(v)),
@@ -336,6 +337,18 @@ fn restrict_expr_kind(value: pl::ExprKind) -> ExprKind {
         pl::ExprKind::RqOperator { name, .. } => {
             ExprKind::Ident(Ident::from_name(format!("({} ...)", name)))
         }
+    }
+}
+
+fn restrict_indirection(value: pl::Expr, name: String) -> ExprKind {
+    let value = restrict_expr(value);
+
+    if let ExprKind::Ident(ident) = value.kind {
+        let ident = ident + Ident::from_name(name);
+
+        ExprKind::Ident(ident)
+    } else {
+        ExprKind::Ident(Ident::from_path(vec!["?".to_string(), name]))
     }
 }
 

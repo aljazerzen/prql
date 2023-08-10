@@ -51,7 +51,10 @@ impl Resolver {
 
                     VarDef {
                         name: ty_def.name,
-                        value: Box::new(Expr::new(ExprKind::Type(ty))),
+                        value: Box::new(Expr {
+                            ty: Some(Ty::new(TyKind::Set)),
+                            ..Expr::new(ExprKind::Type(ty))
+                        }),
                         ty_expr: None,
                         kind: VarDefKind::Let,
                     }
@@ -133,16 +136,16 @@ pub(super) fn prepare_expr_decl(value: Box<Expr>) -> DeclKind {
 
 fn get_stdlib_decl(name: &str) -> Option<ExprKind> {
     let set = match name {
-        "int" => PrimitiveSet::Int,
-        "float" => PrimitiveSet::Float,
-        "bool" => PrimitiveSet::Bool,
-        "text" => PrimitiveSet::Text,
-        "date" => PrimitiveSet::Date,
-        "time" => PrimitiveSet::Time,
-        "timestamp" => PrimitiveSet::Timestamp,
-        "func" => return Some(ExprKind::Type(Ty::new(TyKind::Function(None)))),
-        "any" => return Some(ExprKind::Type(Ty::new(TyKind::Any))),
+        "int" => Ty::new(PrimitiveSet::Int),
+        "float" => Ty::new(PrimitiveSet::Float),
+        "bool" => Ty::new(PrimitiveSet::Bool),
+        "text" => Ty::new(PrimitiveSet::Text),
+        "date" => Ty::new(PrimitiveSet::Date),
+        "time" => Ty::new(PrimitiveSet::Time),
+        "timestamp" => Ty::new(PrimitiveSet::Timestamp),
+        "func" => Ty::new(TyKind::Function(None)),
+        "any" => Ty::new(TyKind::Any),
         _ => return None,
     };
-    Some(ExprKind::Type(Ty::new(set)))
+    Some(ExprKind::Type(set))
 }

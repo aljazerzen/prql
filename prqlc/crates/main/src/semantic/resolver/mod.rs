@@ -2,6 +2,7 @@ mod expr;
 mod flatten;
 mod functions;
 mod name_resolution;
+mod static_eval;
 mod stmt;
 mod transforms;
 mod types;
@@ -17,7 +18,7 @@ pub struct Resolver {
     pub current_module_path: Vec<String>,
 
     /// Sometimes ident closures must be resolved and sometimes not. See [test::test_func_call_resolve].
-    in_func_call_name: bool,
+    pub(super) in_func_call_name: bool,
 
     disable_type_checking: bool,
 

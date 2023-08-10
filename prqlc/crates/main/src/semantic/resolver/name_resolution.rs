@@ -5,36 +5,160 @@ use std::collections::HashSet;
 use prqlc_ast::expr::Ident;
 
 use crate::ir::decl::{Decl, DeclKind, Module, RootModule};
-use crate::ir::pl::{Expr, ExprKind, Ty, TyKind};
-use crate::semantic::{NS_INFER, NS_INFER_MODULE, NS_SELF, NS_THIS};
+use crate::ir::pl::{Expr, ExprKind, Ty, TyKind, TyTuple};
+use crate::semantic::{write_pl, NS_INFER, NS_INFER_MODULE, NS_SELF, NS_THIS};
 use crate::{Error, WithErrorInfo};
 
 use super::Resolver;
 
 impl Resolver {
-    pub fn resolve_ident(&mut self, ident: &Ident) -> Result<Ident, Error> {
-        // resolve ident relative to current module,
-        // then to parent, then grandparent until root
-        let mut ident = ident.clone().prepend(self.current_module_path.clone());
+    pub fn resolve_ident(&mut self, ident: &Ident) -> Result<(&Ty, ExprKind), Error> {
+        let mut ident_parts = ident.iter();
+        let first = ident_parts.next().unwrap();
 
-        let mut res = self.root_mod.resolve_ident(&ident);
-        for _ in &self.current_module_path {
-            if res.is_ok() {
-                break;
+        // find base module
+        let (base, fq_ident) = find_lookup_base(
+            &self.root_mod.module,
+            self.current_module_path.iter().collect(),
+            first,
+        )
+        .ok_or_else(|| Error::new_simple(format!("unknown name {first}")))?;
+
+        // lookup each of the parts
+        let mut subject = IndirectionResult::Decl(base);
+
+        let mut fq_ident = fq_ident.into_iter().collect_vec();
+        let mut indirections = Vec::new();
+        for part in ident_parts {
+            let sub = subject.into_indirection_subject()?;
+
+            match sub {
+                IndirectionSubject::Module(_) => fq_ident.push(part.clone()),
+                IndirectionSubject::Tuple(_) => indirections.push(part.clone()),
             }
-            ident = ident.pop_front().1.unwrap();
-            res = self.root_mod.resolve_ident(&ident);
+
+            subject = sub
+                .lookup(part)
+                .ok_or_else(|| Error::new_simple(format!("unknown field or declaration {part}")))?;
         }
 
-        if res.is_err() {
-            log::debug!("cannot resolve `{ident}` in context={:#?}", self.root_mod);
+        // compose result
+        let res_ty = subject.into_ty()?;
+
+        let mut res = ExprKind::Ident(Ident::from_path(fq_ident));
+        for name in indirections {
+            res = ExprKind::Indirection {
+                expr: Box::new(Expr::new(res)),
+                name,
+            };
         }
 
-        res
+        Ok((res_ty, res))
+    }
+}
+
+// Looks for an ident part relative to current module,
+// then to parent, then grandparent until root.
+fn find_lookup_base<'a, 'b>(
+    root: &'a Module,
+    mut current_path: Vec<&'b String>,
+    name: &'b String,
+) -> Option<(&'a Decl, Ident)> {
+    loop {
+        current_path.push(name);
+
+        let fq_ident = Ident::from_path(current_path.clone());
+
+        if let Some(decl) = root.get(&fq_ident) {
+            return Some((decl, fq_ident));
+        }
+
+        // pop name
+        current_path.pop().unwrap();
+
+        // pop last segment
+        if current_path.pop().is_none() {
+            break;
+        }
+    }
+
+    None
+}
+
+/// A structure that supports indirection (a lookup by name).
+enum IndirectionSubject<'a> {
+    Module(&'a Module),
+    Tuple(&'a TyTuple),
+}
+
+enum IndirectionResult<'a> {
+    Decl(&'a Decl),
+    Ty(Option<&'a Ty>),
+}
+
+impl<'a> IndirectionSubject<'a> {
+    fn lookup(self, name: &String) -> Option<IndirectionResult<'a>> {
+        match self {
+            IndirectionSubject::Module(module) => {
+                module.names.get(name).map(IndirectionResult::Decl)
+            }
+            IndirectionSubject::Tuple(ty_tuple) => {
+                let field = if let Ok(index) = name.parse::<usize>() {
+                    ty_tuple.fields.get(index)
+                } else {
+                    ty_tuple
+                        .fields
+                        .iter()
+                        .find(|(n, _)| n.as_ref() == Some(name))
+                };
+
+                field.map(|(_, ty)| IndirectionResult::Ty(ty.as_ref()))
+            }
+        }
+    }
+}
+
+impl<'a> IndirectionResult<'a> {
+    fn into_indirection_subject(self) -> Result<IndirectionSubject<'a>, Error> {
+        match self {
+            IndirectionResult::Decl(decl) => match &decl.kind {
+                DeclKind::Module(module) => Ok(IndirectionSubject::Module(module)),
+                DeclKind::Expr(expr) => {
+                    IndirectionResult::Ty(expr.ty.as_ref()).into_indirection_subject()
+                }
+                DeclKind::Param(ty) => IndirectionResult::Ty(Some(ty)).into_indirection_subject(),
+                k => Err(Error::new_simple(format!("cannot lookup into {k}"))),
+            },
+
+            IndirectionResult::Ty(Some(ty)) => match &ty.kind {
+                TyKind::Tuple(tuple) => Ok(IndirectionSubject::Tuple(tuple)),
+                tk => Err(Error::new_simple(format!("cannot lookup into {tk}"))),
+            },
+            IndirectionResult::Ty(None) => Err(Error::new_simple("cannot lookup unknown type")),
+        }
+    }
+
+    fn into_ty(self) -> Result<&'a Ty, Error> {
+        match self {
+            IndirectionResult::Decl(decl) => match &decl.kind {
+                DeclKind::Expr(expr) => Ok(expr.ty.as_ref().ok_or_else(|| {
+                    Error::new_simple(format!("Unknown type of `{}`", write_pl(*expr.clone())))
+                })?),
+
+                DeclKind::Param(ty) => Ok(ty),
+
+                k => Err(Error::new_simple(format!(
+                    "cannot reference {k} as a value"
+                ))),
+            },
+
+            IndirectionResult::Ty(_) => Err(Error::new_simple("cannot reference type as a value")),
+        }
     }
 }
 
 impl RootModule {
+    #[allow(dead_code)]
     pub(super) fn resolve_ident(&mut self, ident: &Ident) -> Result<Ident, Error> {
         // special case: wildcard
         if ident.name.contains('*') {

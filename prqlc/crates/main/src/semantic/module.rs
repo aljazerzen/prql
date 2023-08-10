@@ -8,8 +8,8 @@ use crate::ir::pl::{Annotation, Expr, Ident, Ty, TyKind, TyTuple};
 use crate::Error;
 
 use super::{
-    NS_DEFAULT_DB, NS_INFER, NS_INFER_MODULE, NS_MAIN, NS_PARAM, NS_QUERY_DEF, NS_SELF, NS_STD,
-    NS_THAT, NS_THIS,
+    NS_DEFAULT_DB, NS_INFER, NS_INFER_MODULE, NS_MAIN, NS_PARAM, NS_QUERY_DEF, NS_STD, NS_THAT,
+    NS_THIS,
 };
 
 impl Module {
@@ -145,70 +145,6 @@ impl Module {
         }
 
         ns.names.get(&fq_ident.name)
-    }
-
-    pub(super) fn insert_relation(&mut self, expr: &Expr, namespace: &str) {
-        let ty = expr.ty.as_ref().unwrap();
-        let tuple = ty.kind.as_array().unwrap();
-
-        self.insert_ty(namespace.to_string(), tuple, 0);
-    }
-
-    /// Creates a name resolution declaration that allows lookups into the given type.
-    fn insert_ty(&mut self, name: String, ty: &Ty, order: usize) {
-        log::debug!("inserting `{name}`: {ty}");
-
-        let decl_kind = match &ty.kind {
-            // for tuples, create a submodule
-            TyKind::Tuple(tuple) => {
-                let mut sub_mod = Module::default();
-
-                if let Some(instance_of) = &ty.instance_of {
-                    let lineage = ty.lineage.unwrap();
-
-                    let self_decl = Decl {
-                        declared_at: None,
-                        kind: DeclKind::InstanceOf {
-                            table_fq: instance_of.clone(),
-                            lineage,
-                        },
-                        ..Default::default()
-                    };
-                    sub_mod.names.insert(NS_SELF.to_string(), self_decl);
-                }
-
-                for (index, (name, ty)) in tuple.fields.iter().enumerate() {
-                    if let Some(name) = name {
-                        sub_mod.insert_ty(name.clone(), ty.as_ref().unwrap(), index + 1);
-                    } else {
-                        // unnamed tuple fields cannot be references,
-                        // so there is no point of having them in the module
-                    }
-                }
-                if tuple.has_other {
-                    let field_ty = Ty {
-                        lineage: ty.lineage,
-                        ..Ty::new(TyKind::Any)
-                    };
-
-                    let decl_kind = DeclKind::Infer(Box::new(DeclKind::Column(field_ty)));
-
-                    let mut decl = Decl::from(decl_kind);
-                    decl.order = tuple.fields.len() + 1;
-                    sub_mod.names.insert(NS_INFER.to_string(), decl);
-                }
-
-                self.redirects.insert(Ident::from_name(&name));
-                DeclKind::Module(sub_mod)
-            }
-
-            // for anything else, create a plain column
-            _ => DeclKind::Column(ty.clone()),
-        };
-
-        let mut decl = Decl::from(decl_kind);
-        decl.order = order;
-        self.names.insert(name, decl);
     }
 
     pub fn shadow(&mut self, ident: &str) {

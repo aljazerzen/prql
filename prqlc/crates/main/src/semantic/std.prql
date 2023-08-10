@@ -13,28 +13,6 @@
 #   * `body_expr` defines the function body that creates the result.
 #     It can be PRQL code or `internal ...` to indicate internal compiler code.
 
-# Operators
-
-let mul = left right -> <int || float> internal std.mul
-let div_i = left right -> <int || float> internal std.div_i
-let div_f = left right -> <int || float> internal std.div_f
-let mod = left right -> <int || float> internal std.mod
-let add = left<int || float || timestamp || date> right<int || float || timestamp || date> -> <int || float || timestamp || date> internal std.add
-let sub = left<int || float || timestamp || date> right<int || float || timestamp || date> -> <int || float || timestamp || date> internal std.sub
-let eq = left right -> <bool> internal std.eq
-let ne = left right -> <bool> internal std.ne
-let gt = left right -> <bool> internal std.gt
-let lt = left right -> <bool> internal std.lt
-let gte = left right -> <bool> internal std.gte
-let lte = left right -> <bool> internal std.lte
-let and = left<bool> right<bool> -> <bool> internal std.and
-let or = left<bool> right<bool> -> <bool> internal std.or
-let coalesce = left right -> internal std.coalesce
-let regex_search = text pattern -> <bool> internal std.regex_search
-
-let neg = expr<int || float> -> <int || float> internal std.neg
-let not = expr<bool> -> <bool> internal std.not
-
 # Types
 
 ## Type primitives
@@ -48,8 +26,29 @@ type timestamp
 type `func`
 type any
 
+# Operators
+
+let or = left<bool> right<bool> -> <bool> internal std.or
+let mul = left right -> <int || float> internal std.mul
+let div_i = left right -> <int || float> internal std.div_i
+let div_f = left right -> <int || float> internal std.div_f
+let mod = left right -> <int || float> internal std.mod
+let add = left<int || float || timestamp || date> right<int || float || timestamp || date> -> <int || float || timestamp || date> internal std.add
+let sub = left<int || float || timestamp || date> right<int || float || timestamp || date> -> <int || float || timestamp || date> internal std.sub
+let eq = left right -> <bool> internal std.eq
+let ne = left right -> <bool> internal std.ne
+let gt = left right -> <bool> internal std.gt
+let lt = left right -> <bool> internal std.lt
+let gte = left right -> <bool> internal std.gte
+let lte = left right -> <bool> internal std.lte
+let and = left<bool> right<bool> -> <bool> internal std.and
+let coalesce = left right -> internal std.coalesce
+let regex_search = text pattern -> <bool> internal std.regex_search
+
+let neg = expr<int || float> -> <int || float> internal std.neg
+let not = expr<bool> -> <bool> internal std.not
+
 ## Generic array
-# TODO: an array of anything, not just nulls
 type array = [any]
 
 ## Scalar

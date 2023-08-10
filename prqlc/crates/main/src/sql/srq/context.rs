@@ -39,7 +39,6 @@ pub struct AnchorContext {
 
 #[derive(Debug, Clone)]
 pub struct SqlTableDecl {
-    #[allow(dead_code)]
     pub id: TId,
 
     /// Name of the table. Sometimes pull-in from RQ name hints (or database table names).

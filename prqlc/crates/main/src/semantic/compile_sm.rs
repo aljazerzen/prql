@@ -69,6 +69,15 @@ impl SmCompiler {
 
             pl::ExprKind::Func(_) => todo!(),
 
+            pl::ExprKind::Indirection { expr, name } => {
+                let expr = self.compile_expr(*expr)?;
+                let name = self.compile_expr(pl::Expr::new(pl::Literal::String(name)))?;
+                sm::ExprKind::Operator {
+                    name: "std.tuple_indirection".to_string(),
+                    args: vec![expr, name],
+                }
+            }
+
             pl::ExprKind::TupleFields(_) => todo!(),
             pl::ExprKind::TupleExclude { .. } => todo!(),
 

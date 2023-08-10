@@ -79,6 +79,10 @@ pub fn fold_expr_kind<T: ?Sized + PlFold>(fold: &mut T, expr_kind: ExprKind) -> 
             expr: Box::new(fold.fold_expr(*expr)?),
             exclude,
         },
+        Indirection { expr, name } => Indirection {
+            expr: Box::new(fold.fold_expr(*expr)?),
+            name,
+        },
 
         SString(items) => SString(
             items

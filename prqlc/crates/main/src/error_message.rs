@@ -292,7 +292,7 @@ impl WithErrorInfo for crate::Error {
     }
 
     fn with_span(mut self, span: Option<Span>) -> Self {
-        self.span = span;
+        self.span = self.span.or(span);
         self
     }
 

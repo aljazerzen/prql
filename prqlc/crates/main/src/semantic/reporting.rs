@@ -76,6 +76,7 @@ impl<'a> PlFold for Labeler<'a> {
                 let (decl, color) = if let Some(decl) = decl {
                     let color = match &decl.kind {
                         DeclKind::Expr(_) => Color::Blue,
+                        DeclKind::Param(_) => Color::Magenta,
                         DeclKind::Column { .. } => Color::Yellow,
                         DeclKind::InstanceOf { .. } => Color::Yellow,
                         DeclKind::Module(_) => Color::Cyan,
