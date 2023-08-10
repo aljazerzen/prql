@@ -16,8 +16,6 @@ pub struct Resolver {
 
     pub current_module_path: Vec<String>,
 
-    default_namespace: Option<String>,
-
     /// Sometimes ident closures must be resolved and sometimes not. See [test::test_func_call_resolve].
     in_func_call_name: bool,
 
@@ -39,7 +37,6 @@ impl Resolver {
             root_mod,
             options,
             current_module_path: Vec::new(),
-            default_namespace: None,
             in_func_call_name: false,
             disable_type_checking: false,
             id: IdGenerator::new(),

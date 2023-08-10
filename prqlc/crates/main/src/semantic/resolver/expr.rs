@@ -151,7 +151,6 @@ impl PlFold for Resolver {
                 named_args,
             }) => {
                 // fold function name
-                self.default_namespace = None;
                 let old = self.in_func_call_name;
                 self.in_func_call_name = true;
                 let name = self.fold_expr(*name)?;

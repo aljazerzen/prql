@@ -14,28 +14,24 @@ use super::Resolver;
 
 impl Resolver {
     pub fn resolve_ident(&mut self, ident: &Ident) -> Result<Ident, Error> {
-        if let Some(default_namespace) = &self.default_namespace {
-            self.root_mod.resolve_ident(ident, Some(default_namespace))
-        } else {
-            // resolve ident relative to current module,
-            // then to parent, then grandparent until root
-            let mut ident = ident.clone().prepend(self.current_module_path.clone());
+        // resolve ident relative to current module,
+        // then to parent, then grandparent until root
+        let mut ident = ident.clone().prepend(self.current_module_path.clone());
 
-            let mut res = self.root_mod.resolve_ident(&ident, None);
-            for _ in &self.current_module_path {
-                if res.is_ok() {
-                    break;
-                }
-                ident = ident.pop_front().1.unwrap();
-                res = self.root_mod.resolve_ident(&ident, None);
+        let mut res = self.root_mod.resolve_ident(&ident);
+        for _ in &self.current_module_path {
+            if res.is_ok() {
+                break;
             }
-
-            if res.is_err() {
-                log::debug!("cannot resolve `{ident}` in context={:#?}", self.root_mod);
-            }
-
-            res
+            ident = ident.pop_front().1.unwrap();
+            res = self.root_mod.resolve_ident(&ident);
         }
+
+        if res.is_err() {
+            log::debug!("cannot resolve `{ident}` in context={:#?}", self.root_mod);
+        }
+
+        res
     }
 }
 
@@ -83,11 +79,7 @@ impl RootModule {
         }
     }
 
-    pub(super) fn resolve_ident(
-        &mut self,
-        ident: &Ident,
-        default_namespace: Option<&String>,
-    ) -> Result<Ident, Error> {
+    pub(super) fn resolve_ident(&mut self, ident: &Ident) -> Result<Ident, Error> {
         // special case: wildcard
         if ident.name.contains('*') {
             if ident.name != "*" {
@@ -114,23 +106,7 @@ impl RootModule {
             _ => return Err(ambiguous_error(decls, None)),
         }
 
-        let ident = if let Some(default_namespace) = default_namespace {
-            let ident = ident.clone().prepend(vec![default_namespace.clone()]);
-
-            let decls = self.module.lookup(&ident);
-            match decls.len() {
-                // no match: try match *
-                0 => ident,
-
-                // single match, great!
-                1 => return Ok(decls.into_iter().next().unwrap()),
-
-                // ambiguous
-                _ => return Err(ambiguous_error(decls, None)),
-            }
-        } else {
-            ident.clone()
-        };
+        let ident = ident.clone();
 
         // fallback case: try to match with NS_INFER and infer the declaration from the original ident.
         match self.resolve_ident_fallback(ident, NS_INFER) {
