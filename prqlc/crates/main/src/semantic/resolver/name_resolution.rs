@@ -10,6 +10,35 @@ use crate::ir::pl::{Annotation, Expr, ExprKind, Ty, TyKind};
 use crate::semantic::{NS_INFER, NS_INFER_MODULE, NS_SELF, NS_STD, NS_THIS};
 use crate::{Error, WithErrorInfo};
 
+use super::Resolver;
+
+impl Resolver {
+    pub fn resolve_ident(&mut self, ident: &Ident) -> Result<Ident, Error> {
+        if let Some(default_namespace) = &self.default_namespace {
+            self.root_mod.resolve_ident(ident, Some(default_namespace))
+        } else {
+            // resolve ident relative to current module,
+            // then to parent, then grandparent until root
+            let mut ident = ident.clone().prepend(self.current_module_path.clone());
+
+            let mut res = self.root_mod.resolve_ident(&ident, None);
+            for _ in &self.current_module_path {
+                if res.is_ok() {
+                    break;
+                }
+                ident = ident.pop_front().1.unwrap();
+                res = self.root_mod.resolve_ident(&ident, None);
+            }
+
+            if res.is_err() {
+                log::debug!("cannot resolve `{ident}` in context={:#?}", self.root_mod);
+            }
+
+            res
+        }
+    }
+}
+
 impl RootModule {
     pub(super) fn declare(
         &mut self,

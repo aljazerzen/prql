@@ -17,7 +17,6 @@ pub struct QueryDef {
 pub enum VarDefKind {
     Let,
     Into,
-    Main,
 }
 
 // The following code is tested by the tests_misc crate to match stmt.rs in prql_compiler.

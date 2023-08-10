@@ -3,7 +3,7 @@ use itertools::Itertools;
 
 use crate::ir::pl::*;
 use crate::semantic::ast_expand::try_restrict_range;
-use crate::semantic::write_pl;
+use crate::semantic::{write_pl, NS_THAT, NS_THIS};
 use crate::{Error, Reason, WithErrorInfo};
 
 use super::Resolver;
@@ -110,6 +110,40 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
 }
 
 impl Resolver {
+    pub fn fold_type_expr(&mut self, expr: Option<Box<Expr>>) -> Result<Option<Ty>> {
+        Ok(match expr {
+            Some(expr) => {
+                let name = expr.kind.as_ident().map(|i| i.name.clone());
+
+                let old = self.disable_type_checking;
+                self.disable_type_checking = true;
+                let expr = self.fold_expr(*expr)?;
+                self.disable_type_checking = old;
+
+                let mut set_expr = coerce_to_type(self, expr)?;
+                set_expr.name = set_expr.name.or(name);
+                Some(set_expr)
+            }
+            None => None,
+        })
+    }
+
+    pub fn fold_ty_or_expr(&mut self, ty_or_expr: Option<TyOrExpr>) -> Result<Option<TyOrExpr>> {
+        self.root_mod.module.shadow(NS_THIS);
+        self.root_mod.module.shadow(NS_THAT);
+
+        let res = match ty_or_expr {
+            Some(TyOrExpr::Expr(ty_expr)) => {
+                Some(TyOrExpr::Ty(self.fold_type_expr(Some(ty_expr))?.unwrap()))
+            }
+            _ => ty_or_expr,
+        };
+
+        self.root_mod.module.unshadow(NS_THIS);
+        self.root_mod.module.unshadow(NS_THAT);
+        Ok(res)
+    }
+
     pub fn infer_type(&mut self, expr: &Expr) -> Result<Option<Ty>> {
         if let Some(ty) = &expr.ty {
             return Ok(Some(ty.clone()));

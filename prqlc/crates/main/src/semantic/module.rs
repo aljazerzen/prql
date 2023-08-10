@@ -8,7 +8,8 @@ use crate::ir::pl::{Expr, Ident, Ty, TyKind, TyTuple};
 use crate::Error;
 
 use super::{
-    NS_DEFAULT_DB, NS_INFER, NS_INFER_MODULE, NS_PARAM, NS_SELF, NS_STD, NS_THAT, NS_THIS, NS_QUERY_DEF, NS_MAIN,
+    NS_DEFAULT_DB, NS_INFER, NS_INFER_MODULE, NS_MAIN, NS_PARAM, NS_QUERY_DEF, NS_SELF, NS_STD,
+    NS_THAT, NS_THIS,
 };
 
 impl Module {

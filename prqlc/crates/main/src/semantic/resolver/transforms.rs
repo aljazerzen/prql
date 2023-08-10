@@ -8,10 +8,11 @@ use crate::ir::decl::{Decl, DeclKind, Module};
 use crate::ir::generic::{SortDirection, WindowKind};
 use crate::ir::pl::*;
 use crate::semantic::ast_expand::try_restrict_range;
-use crate::semantic::resolver::type_resolver::type_intersection;
+use crate::semantic::resolver::types::type_intersection;
 use crate::semantic::write_pl;
 use crate::{Error, Reason, WithErrorInfo};
 
+use super::expr::create_tuple_exclude;
 use super::Resolver;
 use super::NS_PARAM;
 
@@ -302,7 +303,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         "tuple_exclude" => {
             let [expr, exclude] = unpack(closure);
 
-            return super::create_tuple_exclude(expr, exclude, None);
+            return create_tuple_exclude(expr, exclude, None);
         }
 
         "from_text" => {
@@ -396,7 +397,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
 
 impl Resolver {
     /// Wraps non-tuple Exprs into a singleton Tuple.
-    pub fn coerce_into_tuple(&mut self, expr: Expr) -> Result<Expr> {
+    fn coerce_into_tuple(&mut self, expr: Expr) -> Result<Expr> {
         let is_tuple = expr.ty.as_ref().unwrap().is_tuple()
             && !(expr.kind.is_tuple_exclude() || expr.kind.is_tuple_fields());
         Ok(if !is_tuple {
