@@ -79,7 +79,6 @@ pub fn expand_expr(expr: Expr) -> Result<pl::Expr> {
         id: None,
         target_id: None,
         ty: None,
-        needs_window: false,
     })
 }
 

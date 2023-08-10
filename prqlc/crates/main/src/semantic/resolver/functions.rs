@@ -15,6 +15,8 @@ impl Resolver {
     pub fn fold_function(&mut self, closure: Func, span: Option<Span>) -> Result<Expr> {
         let closure = self.resolve_function_types(closure)?;
 
+        let closure = self.resolve_function_body(closure)?;
+
         log::debug!(
             "func {} {}/{} params",
             closure.as_debug_name(),
@@ -44,20 +46,13 @@ impl Resolver {
         };
 
         // push the env
-        let closure_env = Module::from_exprs(closure.env);
-        self.root_mod.module.stack_push(NS_PARAM, closure_env);
-        let closure = Func {
-            env: HashMap::new(),
-            ..closure
-        };
-
-        if log::log_enabled!(log::Level::Debug) {
-            let name = closure
+        log::debug!(
+            "resolving args of function {}",
+            closure
                 .name_hint
                 .clone()
-                .unwrap_or_else(|| Ident::from_name("<unnamed>"));
-            log::debug!("resolving args of function {}", name);
-        }
+                .unwrap_or_else(|| Ident::from_name("<unnamed>"))
+        );
         let res = self.resolve_function_args(closure)?;
 
         let closure = match res {
@@ -67,11 +62,6 @@ impl Resolver {
             }
         };
 
-        let needs_window = (closure.params.last())
-            .and_then(|p| p.ty.as_ref())
-            .map(|t| t.as_ty().unwrap().is_sub_type_of_array())
-            .unwrap_or_default();
-
         // evaluate
         let res = if let ExprKind::Internal(operator_name) = &closure.body.kind {
             // special case: functions that have internal body
@@ -79,7 +69,6 @@ impl Resolver {
             if operator_name.starts_with("std.") {
                 Expr {
                     ty: closure.return_ty.map(|t| t.into_ty().unwrap()),
-                    needs_window,
                     ..Expr::new(ExprKind::RqOperator {
                         name: operator_name.clone(),
                         args: closure.args,
@@ -128,10 +117,42 @@ impl Resolver {
             }
         };
 
-        // pop the env
-        self.root_mod.module.stack_pop(NS_PARAM).unwrap();
-
         Ok(Expr { span, ..res })
+    }
+
+    fn resolve_function_body(&mut self, mut func: Func) -> Result<Func> {
+        if matches!(func.body.kind, ExprKind::Internal(_)) {
+            return Ok(func);
+        }
+
+        self.root_mod.module.shadow(NS_PARAM);
+        let module = self.root_mod.module.names.get_mut(NS_PARAM).unwrap();
+        let module = module.kind.as_module_mut().unwrap();
+
+        for param in func.params.iter().chain(func.named_params.iter()) {
+            let mut ty = (param.ty)
+                .clone()
+                .map(|t| t.into_ty().unwrap())
+                .unwrap_or_else(|| Ty::new(TyKind::Any));
+
+            // infer types of params during resolution of the body
+            ty.infer = true;
+
+            module.names.insert(
+                param.name.clone(),
+                Decl::from(DeclKind::Param(Box::new(ty))),
+            );
+
+            // this should not be done in most cases, but only when this is an implicit closure
+            // module.redirects.insert(Ident::from_name(&param.name));
+        }
+
+        let body = self.fold_expr(*func.body);
+
+        self.root_mod.module.unshadow(NS_PARAM);
+
+        func.body = Box::new(body?);
+        Ok(func)
     }
 
     pub fn resolve_function_types(&mut self, mut func: Func) -> Result<Func> {
@@ -357,7 +378,7 @@ fn expr_of_func(func: Func, span: Option<Span>) -> Expr {
 }
 
 fn env_of_closure(closure: Func) -> (Module, Expr) {
-    let mut func_env = Module::default();
+    let mut func_env = Module::from_exprs(closure.env);
 
     for (param, arg) in zip(closure.params, closure.args) {
         let v = Decl {

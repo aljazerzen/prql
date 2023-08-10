@@ -38,9 +38,6 @@ pub struct Expr {
     /// [None] means that type should be inferred.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ty: Option<Ty>,
-
-    #[serde(skip)]
-    pub needs_window: bool,
 }
 
 #[derive(Debug, EnumAsInner, PartialEq, Clone, Serialize, Deserialize, strum::AsRefStr)]

@@ -49,11 +49,12 @@ impl PlFold for Resolver {
 
                 Expr {
                     kind,
-                    ty: Some(ty.clone()),
+                    ty: Some(ty),
                     ..node
                 }
             }
 
+            // special case for !{}
             ExprKind::FuncCall(FuncCall { name, args, .. })
                 if (name.kind.as_ident()).map_or(false, |i| i.to_string() == "std.not")
                     && matches!(args[0].kind, ExprKind::Tuple(_)) =>

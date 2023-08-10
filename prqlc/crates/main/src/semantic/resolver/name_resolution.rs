@@ -12,7 +12,7 @@ use crate::{Error, WithErrorInfo};
 use super::Resolver;
 
 impl Resolver {
-    pub fn resolve_ident(&mut self, ident: &Ident) -> Result<(&Ty, ExprKind), Error> {
+    pub fn resolve_ident(&mut self, ident: &Ident) -> Result<(Ty, ExprKind), Error> {
         let mut ident_parts = ident.iter();
         let first = ident_parts.next().unwrap();
 
@@ -22,10 +22,13 @@ impl Resolver {
             self.current_module_path.iter().collect(),
             first,
         )
-        .ok_or_else(|| Error::new_simple(format!("unknown name {first}")))?;
+        .ok_or_else(|| {
+            log::debug!("{:?} {:#?}", self.current_module_path, self.root_mod.module);
+            Error::new_simple(format!("unknown name {first}"))
+        })?;
 
         // lookup each of the parts
-        let mut subject = IndirectionResult::Decl(base);
+        let mut subject = base;
 
         let mut fq_ident = fq_ident.into_iter().collect_vec();
         let mut indirections = Vec::new();
@@ -34,12 +37,12 @@ impl Resolver {
 
             match sub {
                 IndirectionSubject::Module(_) => fq_ident.push(part.clone()),
-                IndirectionSubject::Tuple(_) => indirections.push(part.clone()),
+                IndirectionSubject::Tuple(_) | IndirectionSubject::TupleToInfer => {
+                    indirections.push(part.clone())
+                }
             }
 
-            subject = sub
-                .lookup(part)
-                .ok_or_else(|| Error::new_simple(format!("unknown field or declaration {part}")))?;
+            subject = sub.lookup_one(part)?;
         }
 
         // compose result
@@ -59,26 +62,32 @@ impl Resolver {
 
 // Looks for an ident part relative to current module,
 // then to parent, then grandparent until root.
-fn find_lookup_base<'a, 'b>(
+fn find_lookup_base<'a>(
     root: &'a Module,
-    mut current_path: Vec<&'b String>,
-    name: &'b String,
-) -> Option<(&'a Decl, Ident)> {
-    loop {
-        current_path.push(name);
+    current_path: Vec<&'a String>,
+    name: &'a String,
+) -> Option<(IndirectionResult<'a>, Ident)> {
+    let mut module_stack = root
+        .lookup_module_path(&current_path)
+        .expect("current path does not exist");
 
-        let fq_ident = Ident::from_path(current_path.clone());
+    while let Some((module, mut path)) = module_stack.pop() {
+        log::trace!("looking into {path:?}");
 
-        if let Some(decl) = root.get(&fq_ident) {
-            return Some((decl, fq_ident));
+        let result = IndirectionSubject::Module(module).lookup_one(name);
+        // TODO: ambiguous should result in error here
+        if let Ok(res) = result {
+            path.push(name);
+            let fq_ident = Ident::from_path(path);
+
+            return Some((res, fq_ident));
         }
 
-        // pop name
-        current_path.pop().unwrap();
-
-        // pop last segment
-        if current_path.pop().is_none() {
-            break;
+        for redirect in &module.redirects {
+            let redirect = redirect.iter().collect_vec();
+            if let Some(mut redirected) = module.lookup_module_path(&redirect) {
+                module_stack.push(redirected.pop().unwrap());
+            }
         }
     }
 
@@ -89,18 +98,36 @@ fn find_lookup_base<'a, 'b>(
 enum IndirectionSubject<'a> {
     Module(&'a Module),
     Tuple(&'a TyTuple),
+    TupleToInfer,
 }
 
+#[derive(PartialEq)]
 enum IndirectionResult<'a> {
     Decl(&'a Decl),
     Ty(Option<&'a Ty>),
+    ToInfer,
 }
 
 impl<'a> IndirectionSubject<'a> {
-    fn lookup(self, name: &String) -> Option<IndirectionResult<'a>> {
+    fn lookup(self, name: &'a String) -> Vec<(IndirectionResult<'a>, Vec<&String>)> {
+        let mut res = Vec::new();
+
         match self {
             IndirectionSubject::Module(module) => {
-                module.names.get(name).map(IndirectionResult::Decl)
+                if let Some(decl) = module.names.get(name) {
+                    res.push((IndirectionResult::Decl(decl), vec![name]));
+                }
+
+                for redirect in &module.redirects {
+                    if let Some(red) = module.get(redirect) {
+                        if let Ok(red) = IndirectionResult::Decl(red).into_indirection_subject() {
+                            for (r, n) in red.lookup(name) {
+                                let path = redirect.iter().chain(n.into_iter()).collect_vec();
+                                res.push((r, path));
+                            }
+                        }
+                    }
+                }
             }
             IndirectionSubject::Tuple(ty_tuple) => {
                 let field = if let Ok(index) = name.parse::<usize>() {
@@ -112,7 +139,35 @@ impl<'a> IndirectionSubject<'a> {
                         .find(|(n, _)| n.as_ref() == Some(name))
                 };
 
-                field.map(|(_, ty)| IndirectionResult::Ty(ty.as_ref()))
+                if let Some((_, ty)) = field {
+                    res.push((IndirectionResult::Ty(ty.as_ref()), vec![name]))
+                } else if ty_tuple.has_other {
+                    res.push((IndirectionResult::Ty(None), vec![name]))
+                }
+            }
+            IndirectionSubject::TupleToInfer => res.push((IndirectionResult::ToInfer, vec![name])),
+        }
+        res
+    }
+
+    fn lookup_one(self, name: &'a String) -> Result<IndirectionResult<'a>, Error> {
+        let res = self.lookup(name);
+        match res.len() {
+            // no match
+            0 => Err(Error::new_simple(format!(
+                "unknown field or declaration {name}"
+            ))),
+
+            // single match, great!
+            1 => Ok(res.into_iter().next().unwrap().0),
+
+            // ambiguous
+            _ => {
+                let idents = res
+                    .into_iter()
+                    .map(|(_, path)| Ident::from_path(path))
+                    .collect();
+                Err(ambiguous_error(idents, None))
             }
         }
     }
@@ -130,22 +185,35 @@ impl<'a> IndirectionResult<'a> {
                 k => Err(Error::new_simple(format!("cannot lookup into {k}"))),
             },
 
-            IndirectionResult::Ty(Some(ty)) => match &ty.kind {
-                TyKind::Tuple(tuple) => Ok(IndirectionSubject::Tuple(tuple)),
-                tk => Err(Error::new_simple(format!("cannot lookup into {tk}"))),
-            },
+            IndirectionResult::Ty(Some(ty)) => {
+                let a_tuple = Ty::new(TyKind::Tuple(TyTuple::default()));
+
+                if !ty.is_super_type_of(&a_tuple) {
+                    return Err(Error::new_simple(format!("cannot lookup into {ty}")));
+                }
+
+                Ok(match &ty.kind {
+                    TyKind::Tuple(tuple) => IndirectionSubject::Tuple(tuple),
+                    _ => IndirectionSubject::TupleToInfer,
+                })
+            }
             IndirectionResult::Ty(None) => Err(Error::new_simple("cannot lookup unknown type")),
+            IndirectionResult::ToInfer => Ok(IndirectionSubject::TupleToInfer),
         }
     }
 
-    fn into_ty(self) -> Result<&'a Ty, Error> {
+    fn into_ty(self) -> Result<Ty, Error> {
         match self {
             IndirectionResult::Decl(decl) => match &decl.kind {
-                DeclKind::Expr(expr) => Ok(expr.ty.as_ref().ok_or_else(|| {
-                    Error::new_simple(format!("Unknown type of `{}`", write_pl(*expr.clone())))
-                })?),
+                DeclKind::Expr(expr) => {
+                    let ty = expr.ty.as_ref().cloned();
+                    let ty = ty.ok_or_else(|| {
+                        Error::new_simple(format!("Unknown type of `{}`", write_pl(*expr.clone())))
+                    })?;
+                    Ok(ty)
+                }
 
-                DeclKind::Param(ty) => Ok(ty),
+                DeclKind::Param(ty) => Ok(*ty.clone()),
 
                 k => Err(Error::new_simple(format!(
                     "cannot reference {k} as a value"
@@ -153,6 +221,11 @@ impl<'a> IndirectionResult<'a> {
             },
 
             IndirectionResult::Ty(_) => Err(Error::new_simple("cannot reference type as a value")),
+
+            IndirectionResult::ToInfer => Ok(Ty {
+                infer: true,
+                ..Ty::new(TyKind::Any)
+            }),
         }
     }
 }

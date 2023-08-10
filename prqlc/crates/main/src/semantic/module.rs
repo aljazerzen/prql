@@ -147,6 +147,25 @@ impl Module {
         ns.names.get(&fq_ident.name)
     }
 
+    pub fn lookup_module_path<'a>(
+        &self,
+        path: &[&'a String],
+    ) -> Option<Vec<(&Module, Vec<&'a String>)>> {
+        let mut res = vec![(self, Vec::new())];
+        let mut current_path = Vec::new();
+
+        for part in path {
+            let current = res.last().unwrap().0;
+            current_path.push(*part);
+
+            let decl = current.names.get(*part)?;
+            let module = decl.kind.as_module()?;
+            res.push((module, current_path.clone()));
+        }
+
+        Some(res)
+    }
+
     pub fn shadow(&mut self, ident: &str) {
         let shadowed = self.names.remove(ident).map(Box::new);
         let entry = DeclKind::Module(Module {

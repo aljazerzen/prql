@@ -117,7 +117,6 @@ impl Expr {
             span: None,
             target_id: None,
             ty: None,
-            needs_window: false,
             alias: None,
         }
     }

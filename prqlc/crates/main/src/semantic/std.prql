@@ -103,6 +103,7 @@ let take = func
   tbl <relation>
   -> <relation> internal std.take
 
+@(implicit_closure on:1 param_names:[this, that])
 let join = func
   right <relation>
   condition <bool>
@@ -126,17 +127,17 @@ let window = func
   -> <relation> internal std.window
 
 let append = bottom<relation> top<relation> -> <relation> internal std.append
-let intersect = bottom<relation> top<relation> -> <relation> (
-  t = top
-  join (b = bottom) (tuple_every (tuple_map _eq (tuple_zip t.* b.*)))
-  select t.*
-)
-let remove = bottom<relation> top<relation> -> <relation> (
-  t = top
-  join side:left (b = bottom) (tuple_every (tuple_map _eq (tuple_zip t.* b.*)))
-  filter (tuple_every (tuple_map _is_null b.*))
-  select t.*
-)
+# let intersect = bottom<relation> top<relation> -> <relation> (
+#   top
+#   join bottom (tuple_every (tuple_map _eq (tuple_zip this that)))
+#   select this.top
+# )
+# let remove = bottom<relation> top<relation> -> <relation> (
+#   top
+#   join side:left (b = bottom) (tuple_every (tuple_map _eq (tuple_zip this that)))
+#   filter (tuple_every (tuple_map _is_null b.*))
+#   select this.top
+# )
 let loop = func
   pipeline <transform>
   top <relation>

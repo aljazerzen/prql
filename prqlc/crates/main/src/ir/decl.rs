@@ -121,8 +121,8 @@ impl std::fmt::Debug for Module {
         } else {
             ds.field("names", &format!("... {} entries ...", self.names.len()));
         }
-        if let Some(shadowed) = &self.shadowed {
-            ds.field("shadowed", shadowed);
+        if let Some(_) = &self.shadowed {
+            ds.field("shadowed", &"(hidden)");
         }
         ds.finish()
     }
