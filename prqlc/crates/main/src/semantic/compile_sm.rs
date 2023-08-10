@@ -43,18 +43,20 @@ struct SmCompiler {
 }
 
 impl SmCompiler {
-    fn compile_decl_as_expr(&mut self, ident: Ident) -> Result<sm::EId> {
-        let decl = self.root_mod.module.get(&ident).unwrap();
+    fn compile_decl_as_expr(&mut self, fq_ident: Ident) -> Result<sm::EId> {
+        let decl = (self.root_mod.module.get(&fq_ident))
+            .expect("cannot find a declaration by its fully-qualified identifier");
 
-        let expr = (decl.kind.as_expr())
-            .ok_or_else(|| Error::new_simple(format!("expected `{ident}` to be an expression")))?;
+        let expr = (decl.kind.as_expr()).ok_or_else(|| {
+            Error::new_simple(format!("expected `{fq_ident}` to be an expression"))
+        })?;
 
         self.compile_expr(*expr.clone())
     }
 
     fn compile_expr(&mut self, expr: pl::Expr) -> Result<sm::EId> {
         let kind = match expr.kind {
-            pl::ExprKind::Ident(ident) => todo!("ident: {ident}"),
+            pl::ExprKind::Ident(fq_ident) => return self.compile_decl_as_expr(fq_ident),
             pl::ExprKind::Literal(lit) => sm::ExprKind::Literal(lit),
 
             pl::ExprKind::Tuple(fields) => sm::ExprKind::Tuple(self.compile_exprs(fields)?),
