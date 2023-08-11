@@ -126,9 +126,10 @@ impl Resolver {
         }
 
         self.root_mod.module.shadow(NS_PARAM);
+
+        // insert type definitions of the params
         let module = self.root_mod.module.names.get_mut(NS_PARAM).unwrap();
         let module = module.kind.as_module_mut().unwrap();
-
         for param in func.params.iter().chain(func.named_params.iter()) {
             let mut ty = (param.ty)
                 .clone()
@@ -147,11 +148,44 @@ impl Resolver {
             // module.redirects.insert(Ident::from_name(&param.name));
         }
 
+        // the beef: resolve body
         let body = self.fold_expr(*func.body);
+
+        // retrieve type definitions of the params
+        let module = self.root_mod.module.names.get_mut(NS_PARAM).unwrap();
+        let module = module.kind.as_module_mut().unwrap();
+        for param in func.params.iter_mut().chain(func.named_params.iter_mut()) {
+            let Some(decl) = module.names.remove(&param.name) else {
+                continue;
+            };
+
+            let DeclKind::Param(ty) = decl.kind else {
+                continue;
+            };
+
+            param.ty = Some(TyOrExpr::Ty(*ty));
+        }
 
         self.root_mod.module.unshadow(NS_PARAM);
 
-        func.body = Box::new(body?);
+        let mut body = body?;
+
+        // validate return type
+        if let Some(body_ty) = &mut body.ty {
+            let expected = func.return_ty.as_ref().and_then(|x| x.as_ty());
+            let who = || {
+                if let Some(name_hint) = &func.name_hint {
+                    Some(format!("return type of function {name_hint}"))
+                } else {
+                    Some("return type".to_string())
+                }
+            };
+            self.validate_type(body_ty, expected, &who)?;
+
+            func.return_ty = Some(TyOrExpr::Ty(body_ty.clone()));
+        }
+
+        func.body = Box::new(body);
         Ok(func)
     }
 

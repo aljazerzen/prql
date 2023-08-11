@@ -73,7 +73,7 @@ let from = func
 
 @(implicit_closure on:0 param_names:[this])
 let select = func
-  columns <any || tuple>
+  columns <tuple>
   tbl <relation>
   -> <relation> internal std.select
 

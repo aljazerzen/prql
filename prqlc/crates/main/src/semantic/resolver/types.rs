@@ -1,6 +1,7 @@
 use anyhow::Result;
 use itertools::Itertools;
 
+use crate::ir::decl::DeclKind;
 use crate::ir::pl::*;
 use crate::semantic::ast_expand::try_restrict_range;
 use crate::semantic::{write_pl, NS_THAT, NS_THIS};
@@ -390,16 +391,11 @@ impl Resolver {
             if is_found_above {
                 // This if prevents variables of for example type `int || timestamp` to be inferred
                 // as `text`.
-                let instance_of = found.instance_of.take();
-
-                *found = expected.clone();
+                restrict_type(found, expected.clone());
 
                 // propagate the inference to table declarations
-                // TODO: could this be unified with [Context::infer_decl]?
-                if let Some(instance_of) = instance_of {
-                    let _decl = self.root_mod.module.get(&instance_of).unwrap();
-
-                    // TODO
+                if let Some(instance_of) = &found.instance_of {
+                    self.push_type_info(instance_of, expected.clone())
                 }
                 return Ok(());
             }
@@ -449,6 +445,109 @@ impl Resolver {
 
     //     Ok(found.next().is_none())
     // }
+
+    /// Saves information that declaration identified by `fq_ident` must be of type `sub_ty`.
+    /// Param `sub_ty` must be a sub type of the current type of the declaration.
+    pub fn push_type_info(&mut self, fq_ident: &Ident, sub_ty: Ty) {
+        let decl = self.root_mod.module.get_mut(fq_ident).unwrap();
+
+        match &mut decl.kind {
+            DeclKind::Expr(expr) => {
+                restrict_type_opt(&mut expr.ty, Some(sub_ty));
+            }
+            DeclKind::Param(ty) => {
+                restrict_type(ty, sub_ty);
+            }
+
+            DeclKind::Module(_)
+            | DeclKind::LayeredModules(_)
+            | DeclKind::Column(_)
+            | DeclKind::Infer(_)
+            | DeclKind::InstanceOf { .. }
+            | DeclKind::QueryDef(_) => {
+                panic!("declaration {decl} cannot have a type")
+            }
+        }
+    }
+}
+
+fn restrict_type_opt(ty: &mut Option<Ty>, sub_ty: Option<Ty>) {
+    let Some(sub_ty) = sub_ty else {
+        return;
+    };
+    if let Some(ty) = ty {
+        restrict_type(ty, sub_ty)
+    } else {
+        *ty = Some(sub_ty);
+    }
+}
+
+fn restrict_type(ty: &mut Ty, sub_ty: Ty) {
+    match (&mut ty.kind, sub_ty.kind) {
+        (TyKind::Any, sub) => ty.kind = sub,
+
+        (TyKind::Union(variants), sub_kind) => {
+            let sub_ty = Ty {
+                kind: sub_kind,
+                ..sub_ty
+            };
+            let drained = variants
+                .drain(..)
+                .filter(|(_, variant)| variant.is_super_type_of(&sub_ty))
+                .map(|(name, mut ty)| {
+                    restrict_type(&mut ty, sub_ty.clone());
+                    (name, ty)
+                })
+                .collect_vec();
+            variants.extend(drained);
+        }
+
+        (kind, TyKind::Union(sub_variants)) => {
+            todo!("restrict {kind} to union of {sub_variants:?}")
+        }
+
+        (TyKind::Primitive(_), _) => {}
+
+        (TyKind::Singleton(_), _) => {}
+
+        (TyKind::Tuple(tuple), TyKind::Tuple(sub_tuple)) => {
+            for (sub_name, sub_ty) in sub_tuple.fields {
+                if let Some(sub_name) = sub_name {
+                    let existing = tuple
+                        .fields
+                        .iter_mut()
+                        .find(|f| f.0.as_ref() == Some(&sub_name));
+
+                    if let Some((_, existing)) = existing {
+                        restrict_type_opt(existing, sub_ty)
+                    } else {
+                        tuple.fields.push((Some(sub_name), sub_ty));
+                    }
+                } else {
+                    // TODO: insert unnamed fields?
+                }
+            }
+        }
+
+        (TyKind::Array(ty), TyKind::Array(sub_ty)) => restrict_type(ty, *sub_ty),
+
+        (TyKind::Function(ty), TyKind::Function(sub_ty)) => {
+            if sub_ty.is_none() {
+                return;
+            }
+            if ty.is_none() {
+                *ty = sub_ty;
+                return;
+            }
+            if let (Some(func), Some(sub_func)) = (ty, sub_ty) {
+                todo!("restrict function {func:?} to function {sub_func:?}")
+            }
+        }
+
+        _ => {
+            panic!("trying to restrict a type with a non sub type")
+        }
+    }
 }
 
 fn compose_type_error<F>(found_ty: &mut Ty, expected: &Ty, who: &F) -> Error

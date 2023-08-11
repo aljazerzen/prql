@@ -147,20 +147,13 @@ impl Module {
         ns.names.get(&fq_ident.name)
     }
 
-    pub fn lookup_module_path<'a>(
-        &self,
-        path: &[&'a String],
-    ) -> Option<Vec<(&Module, Vec<&'a String>)>> {
-        let mut res = vec![(self, Vec::new())];
-        let mut current_path = Vec::new();
+    pub fn lookup_module(&self, path: &[&String]) -> Option<Vec<&Module>> {
+        let mut res = vec![self];
 
         for part in path {
-            let current = res.last().unwrap().0;
-            current_path.push(*part);
-
-            let decl = current.names.get(*part)?;
+            let decl = res.last().unwrap().names.get(*part)?;
             let module = decl.kind.as_module()?;
-            res.push((module, current_path.clone()));
+            res.push(module);
         }
 
         Some(res)

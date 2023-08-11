@@ -21,34 +21,52 @@ impl Resolver {
             &self.root_mod.module,
             self.current_module_path.iter().collect(),
             first,
-        )
-        .ok_or_else(|| {
-            log::debug!("{:?} {:#?}", self.current_module_path, self.root_mod.module);
-            Error::new_simple(format!("unknown name {first}"))
-        })?;
+        )?;
 
         // lookup each of the parts
-        let mut subject = base;
-
-        let mut fq_ident = fq_ident.into_iter().collect_vec();
+        let mut base = base;
+        let mut fq_ident = fq_ident;
         let mut indirections = Vec::new();
         for part in ident_parts {
-            let sub = subject.into_indirection_subject()?;
+            // convert current base into a lookup subject
+            let subject = base.into_indirection_subject()?;
 
-            match sub {
-                IndirectionSubject::Module(_) => fq_ident.push(part.clone()),
+            // lookup and raise errors
+            let results = subject.lookup(part);
+            let result = raise_if_ambiguous(results)?;
+            let (res, path) = result
+                .ok_or_else(|| Error::new_simple(format!("unknown field or declaration {part}")))?;
+
+            // save the result
+            match subject {
+                IndirectionSubject::Module(_) => fq_ident.extend(path.into_iter().cloned()),
+
                 IndirectionSubject::Tuple(_) | IndirectionSubject::TupleToInfer => {
-                    indirections.push(part.clone())
+                    // tuple indirection cannot contain redirects
+                    let part = path.into_iter().exactly_one().unwrap();
+                    indirections.push(part.clone());
                 }
             }
 
-            subject = sub.lookup_one(part)?;
+            // set base for the next lookup or the result
+            base = res;
         }
+        let fq_ident = Ident::from_path(fq_ident);
+
+        // extract target type
+        let res_ty = if base != IndirectionResult::ToInfer {
+            base.into_ty()?
+        } else {
+            let ty_tuple = tuple_indirections_into_ty(&indirections);
+            self.push_type_info(&fq_ident, ty_tuple);
+            Ty {
+                infer: true,
+                ..Ty::new(TyKind::Any)
+            }
+        };
 
         // compose result
-        let res_ty = subject.into_ty()?;
-
-        let mut res = ExprKind::Ident(Ident::from_path(fq_ident));
+        let mut res = ExprKind::Ident(fq_ident);
         for name in indirections {
             res = ExprKind::Indirection {
                 expr: Box::new(Expr::new(res)),
@@ -64,37 +82,34 @@ impl Resolver {
 // then to parent, then grandparent until root.
 fn find_lookup_base<'a>(
     root: &'a Module,
-    current_path: Vec<&'a String>,
+    mut current_path: Vec<&'a String>,
     name: &'a String,
-) -> Option<(IndirectionResult<'a>, Ident)> {
+) -> Result<(IndirectionResult<'a>, Vec<String>), Error> {
     let mut module_stack = root
-        .lookup_module_path(&current_path)
+        .lookup_module(&current_path)
         .expect("current path does not exist");
 
-    while let Some((module, mut path)) = module_stack.pop() {
-        log::trace!("looking into {path:?}");
+    while let Some(module) = module_stack.pop() {
+        log::trace!("looking into {current_path:?}");
 
-        let result = IndirectionSubject::Module(module).lookup_one(name);
-        // TODO: ambiguous should result in error here
-        if let Ok(res) = result {
-            path.push(name);
-            let fq_ident = Ident::from_path(path);
+        let results = IndirectionSubject::Module(module).lookup(name);
+        let result = raise_if_ambiguous(results)?;
+        if let Some((res, path)) = result {
+            current_path.extend(path);
+            let path = current_path.into_iter().cloned().collect();
 
-            return Some((res, fq_ident));
+            return Ok((res, path));
         }
 
-        for redirect in &module.redirects {
-            let redirect = redirect.iter().collect_vec();
-            if let Some(mut redirected) = module.lookup_module_path(&redirect) {
-                module_stack.push(redirected.pop().unwrap());
-            }
-        }
+        current_path.pop();
     }
 
-    None
+    log::debug!("{:#?}", root);
+    Err(Error::new_simple(format!("unknown name {name}")))
 }
 
 /// A structure that supports indirection (a lookup by name).
+#[derive(Clone, Copy)]
 enum IndirectionSubject<'a> {
     Module(&'a Module),
     Tuple(&'a TyTuple),
@@ -142,34 +157,12 @@ impl<'a> IndirectionSubject<'a> {
                 if let Some((_, ty)) = field {
                     res.push((IndirectionResult::Ty(ty.as_ref()), vec![name]))
                 } else if ty_tuple.has_other {
-                    res.push((IndirectionResult::Ty(None), vec![name]))
+                    res.push((IndirectionResult::ToInfer, vec![name]))
                 }
             }
             IndirectionSubject::TupleToInfer => res.push((IndirectionResult::ToInfer, vec![name])),
         }
         res
-    }
-
-    fn lookup_one(self, name: &'a String) -> Result<IndirectionResult<'a>, Error> {
-        let res = self.lookup(name);
-        match res.len() {
-            // no match
-            0 => Err(Error::new_simple(format!(
-                "unknown field or declaration {name}"
-            ))),
-
-            // single match, great!
-            1 => Ok(res.into_iter().next().unwrap().0),
-
-            // ambiguous
-            _ => {
-                let idents = res
-                    .into_iter()
-                    .map(|(_, path)| Ident::from_path(path))
-                    .collect();
-                Err(ambiguous_error(idents, None))
-            }
-        }
     }
 }
 
@@ -186,7 +179,10 @@ impl<'a> IndirectionResult<'a> {
             },
 
             IndirectionResult::Ty(Some(ty)) => {
-                let a_tuple = Ty::new(TyKind::Tuple(TyTuple::default()));
+                let a_tuple = Ty::new(TyKind::Tuple(TyTuple {
+                    fields: Vec::new(),
+                    has_other: true,
+                }));
 
                 if !ty.is_super_type_of(&a_tuple) {
                     return Err(Error::new_simple(format!("cannot lookup into {ty}")));
@@ -220,12 +216,16 @@ impl<'a> IndirectionResult<'a> {
                 ))),
             },
 
-            IndirectionResult::Ty(_) => Err(Error::new_simple("cannot reference type as a value")),
-
-            IndirectionResult::ToInfer => Ok(Ty {
-                infer: true,
-                ..Ty::new(TyKind::Any)
+            IndirectionResult::Ty(ty) => Ok(if let Some(x) = ty {
+                x.clone()
+            } else {
+                Ty {
+                    infer: true,
+                    ..Ty::new(TyKind::Any)
+                }
             }),
+
+            IndirectionResult::ToInfer => unreachable!(),
         }
     }
 }
@@ -475,6 +475,25 @@ fn lookup_in(module: &Module, ident: Ident) -> HashSet<Ident> {
     HashSet::new()
 }
 
+fn raise_if_ambiguous<'a, 'b>(
+    results: Vec<(IndirectionResult<'a>, Vec<&'b String>)>,
+) -> Result<Option<(IndirectionResult<'a>, Vec<&'b String>)>, Error> {
+    if results.len() <= 1 {
+        return Ok(results.into_iter().next());
+    }
+
+    let idents = results
+        .iter()
+        .map(|(_, path)| Ident::from_path(path.clone()))
+        .collect::<HashSet<_>>();
+
+    if idents.len() <= 1 {
+        return Ok(results.into_iter().next());
+    }
+
+    Err(ambiguous_error(idents, None))
+}
+
 fn ambiguous_error(idents: HashSet<Ident>, replace_name: Option<&String>) -> Error {
     let all_this = idents.iter().all(|d| d.starts_with_part(NS_THIS));
 
@@ -499,6 +518,28 @@ fn ambiguous_error(idents: HashSet<Ident>, replace_name: Option<&String>) -> Err
     Error::new_simple("Ambiguous name").push_hint(hint)
 }
 
+/// Given indirection steps that were taken into a tuple,
+/// constructs a tuple type that would support such steps.
+fn tuple_indirections_into_ty(indirections: &Vec<String>) -> Ty {
+    let mut base = Ty::new(TyKind::Any);
+    let mut current = &mut base;
+    for indirection in indirections {
+        let new_ty = Ty {
+            infer: true,
+            ..Ty::new(TyKind::Any)
+        };
+        current.kind = TyKind::Tuple(TyTuple {
+            fields: vec![(Some(indirection.clone()), Some(new_ty))],
+            has_other: true,
+        });
+        let the_new_tuple = current.kind.as_tuple_mut().unwrap();
+        let the_new_field = the_new_tuple.fields.last_mut().unwrap();
+        current = the_new_field.1.as_mut().unwrap();
+    }
+
+    base.infer = true;
+    base
+}
 #[cfg(test)]
 mod tests {
     use prqlc_ast::expr::Literal;
