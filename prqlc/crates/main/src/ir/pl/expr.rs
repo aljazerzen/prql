@@ -15,7 +15,7 @@ use super::{TransformCall, Ty, TyOrExpr};
 
 /// Expr is anything that has a value and thus a type.
 /// If it cannot contain nested Exprs, is should be under [ExprKind::Literal].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Expr {
     #[serde(flatten)]
     pub kind: ExprKind,
@@ -170,5 +170,28 @@ impl Func {
         let ident = self.name_hint.as_ref();
 
         ident.map(|n| n.name.as_str()).unwrap_or("<anonymous>")
+    }
+}
+
+impl std::fmt::Debug for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ds = f.debug_struct("Expr");
+        ds.field("kind", &self.kind);
+        if let Some(x) = &self.span {
+            ds.field("span", x);
+        }
+        if let Some(x) = &self.alias {
+            ds.field("alias", x);
+        }
+        if let Some(x) = &self.id {
+            ds.field("id", x);
+        }
+        if let Some(x) = &self.target_id {
+            ds.field("target_id", x);
+        }
+        if let Some(x) = &self.ty {
+            ds.field("ty", x);
+        }
+        ds.finish()
     }
 }

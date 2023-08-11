@@ -117,7 +117,7 @@ impl std::fmt::Debug for Module {
         }
 
         if self.names.len() < 15 {
-            ds.field("names", &self.names);
+            ds.field("names", &DebugNames(&self.names));
         } else {
             ds.field("names", &format!("... {} entries ...", self.names.len()));
         }
@@ -125,6 +125,18 @@ impl std::fmt::Debug for Module {
             ds.field("shadowed", &"(hidden)");
         }
         ds.finish()
+    }
+}
+
+struct DebugNames<'a>(&'a HashMap<String, Decl>);
+
+impl<'a> std::fmt::Debug for DebugNames<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut dm = f.debug_map();
+        for (n, decl) in self.0.iter().sorted_by_key(|x| x.0) {
+            dm.entry(n, decl);
+        }
+        dm.finish()
     }
 }
 
