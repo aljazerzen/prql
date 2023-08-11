@@ -482,7 +482,7 @@ fn restrict_type_opt(ty: &mut Option<Ty>, sub_ty: Option<Ty>) {
     }
 }
 
-fn restrict_type(ty: &mut Ty, sub_ty: Ty) {
+pub fn restrict_type(ty: &mut Ty, sub_ty: Ty) {
     match (&mut ty.kind, sub_ty.kind) {
         (TyKind::Any, sub) => ty.kind = sub,
 

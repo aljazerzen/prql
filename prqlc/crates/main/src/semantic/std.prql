@@ -28,22 +28,22 @@ type any
 
 # Operators
 
-let or = left<bool> right<bool> -> <bool> internal std.or
-let mul = left right -> <int || float> internal std.mul
-let div_i = left right -> <int || float> internal std.div_i
-let div_f = left right -> <int || float> internal std.div_f
-let mod = left right -> <int || float> internal std.mod
-let add = left<int || float || timestamp || date> right<int || float || timestamp || date> -> <int || float || timestamp || date> internal std.add
-let sub = left<int || float || timestamp || date> right<int || float || timestamp || date> -> <int || float || timestamp || date> internal std.sub
-let eq = left right -> <bool> internal std.eq
-let ne = left right -> <bool> internal std.ne
-let gt = left right -> <bool> internal std.gt
-let lt = left right -> <bool> internal std.lt
-let gte = left right -> <bool> internal std.gte
-let lte = left right -> <bool> internal std.lte
-let and = left<bool> right<bool> -> <bool> internal std.and
-let coalesce = left right -> internal std.coalesce
-let regex_search = text pattern -> <bool> internal std.regex_search
+let or = func left<bool> right<bool> -> <bool> internal std.or
+let mul = func left right -> <int || float> internal std.mul
+let div_i = func left right -> <int || float> internal std.div_i
+let div_f = func left right -> <int || float> internal std.div_f
+let mod = func left right -> <int || float> internal std.mod
+let add = func left<int || float || timestamp || date> right<int || float || timestamp || date> -> <int || float || timestamp || date> internal std.add
+let sub = func left<int || float || timestamp || date> right<int || float || timestamp || date> -> <int || float || timestamp || date> internal std.sub
+let eq = func left right -> <bool> internal std.eq
+let ne = func left right -> <bool> internal std.ne
+let gt = func left right -> <bool> internal std.gt
+let lt = func left right -> <bool> internal std.lt
+let gte = func left right -> <bool> internal std.gte
+let lte = func left right -> <bool> internal std.lte
+let and = func left<bool> right<bool> -> <bool> internal std.and
+let coalesce = func left right -> internal std.coalesce
+let regex_search = func text pattern -> <bool> internal std.regex_search
 
 let neg = expr<int || float> -> <int || float> internal std.neg
 let not = expr<bool> -> <bool> internal std.not
@@ -77,6 +77,7 @@ let select = func
   tbl <relation>
   -> <relation> internal std.select
 
+@(implicit_closure on:0 param_names:[this])
 let filter = func
   condition <bool>
   tbl <relation>
@@ -84,17 +85,19 @@ let filter = func
 
 @(implicit_closure on:0 param_names:[this])
 let derive = func
-  columns <any || tuple>
+  columns <tuple>
   tbl <relation>
   -> <relation> internal std.derive
 
+@(implicit_closure on:0 param_names:[this])
 let aggregate = func
-  columns <any || tuple>
+  columns <tuple>
   tbl <relation>
   -> <relation> internal std.aggregate
 
+@(implicit_closure on:0 param_names:[this])
 let sort = func
-  by <any || tuple>
+  by <tuple>
   tbl <relation>
   -> <relation> internal std.sort
 
@@ -111,18 +114,20 @@ let join = func
   left <relation>
   -> <relation> internal std.join
 
+@(implicit_closure on:0 param_names:[this])
 let group = func
   by<scalar || tuple>
   pipeline <transform>
   tbl <relation>
   -> <relation> internal std.group
 
+@(implicit_closure on:0 param_names:[this])
 let window = func
   rows:0..0
   range:0..0
   expanding <bool>:false
   rolling <int>:0
-  pipeline <transform>
+  columns <transform>
   tbl <relation>
   -> <relation> internal std.window
 

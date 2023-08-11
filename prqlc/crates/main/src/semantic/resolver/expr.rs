@@ -27,7 +27,7 @@ impl PlFold for Resolver {
     }
 
     fn fold_expr(&mut self, node: Expr) -> Result<Expr> {
-        if node.id.is_some() && !matches!(node.kind, ExprKind::Func(_)) {
+        if super::is_resolved(&node) && !matches!(node.kind, ExprKind::Func(_)) {
             return Ok(node);
         }
 

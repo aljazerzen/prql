@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use serde::Deserialize;
 
 use crate::ir::decl::{Decl, DeclKind, Module};
-use crate::ir::generic::{SortDirection, WindowKind};
+use crate::ir::generic::WindowKind;
 use crate::ir::pl::*;
 use crate::semantic::ast_expand::try_restrict_range;
 use crate::semantic::resolver::types::type_intersection;
@@ -17,119 +17,98 @@ use super::Resolver;
 use super::NS_PARAM;
 
 /// try to convert function call with enough args into transform
-pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
-    let internal_name = closure.body.kind.as_internal().unwrap();
+pub fn resolve_special_func(resolver: &mut Resolver, func: Func) -> Result<Expr> {
+    let internal_name = func.body.kind.into_internal().unwrap();
 
     let (kind, input) = match internal_name.as_str() {
-        "select" => {
-            let [assigns, tbl] = unpack::<2>(closure);
+        "std.select" => {
+            let [closure, mut tbl] = unpack::<2>(func.args);
 
-            let tuple = resolver.coerce_into_tuple(assigns)?;
-            (TransformKind::Select { tuple }, tbl)
+            let (_, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
+
+            let result_ty = Ty::new(TyKind::Array(Box::new(out_ty)));
+
+            (vec![closure, tbl], Some(result_ty))
         }
-        "filter" => {
-            let [filter, tbl] = unpack::<2>(closure);
+        "std.filter" => {
+            let [closure_expr, mut tbl] = unpack::<2>(func.args);
 
-            let filter = Box::new(filter);
-            (TransformKind::Filter { filter }, tbl)
+            resolver.simulate_array_map(&closure_expr, &mut tbl)?;
+
+            (vec![closure_expr, tbl], tbl.ty)
         }
-        "derive" => {
-            let [assigns, tbl] = unpack::<2>(closure);
+        "std.derive" => {
+            let [closure, mut tbl] = unpack::<2>(func.args);
 
-            let tuple = resolver.coerce_into_tuple(assigns)?;
-            (TransformKind::Derive { tuple }, tbl)
+            let (in_ty, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
+
+            let in_tuple = in_ty.kind.as_tuple().unwrap();
+            let out_tuple = out_ty.kind.as_tuple().unwrap();
+
+            let result_tuple = resolver.concat_tuples(in_tuple, out_tuple)?;
+
+            let result_ty = Ty::new(TyKind::Array(Box::new(result_tuple)));
+            (vec![closure, tbl], Some(result_ty))
         }
-        "aggregate" => {
-            let [assigns, tbl] = unpack::<2>(closure);
+        "std.aggregate" => {
+            let [closure, mut tbl] = unpack::<2>(func.args);
 
-            let tuple = resolver.coerce_into_tuple(assigns)?;
-            (TransformKind::Aggregate { tuple }, tbl)
+            let (_, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
+
+            let result_ty = Ty::new(TyKind::Array(Box::new(out_ty)));
+            (vec![closure, tbl], Some(result_ty))
         }
-        "sort" => {
-            let [by, tbl] = unpack::<2>(closure);
+        "std.sort" => {
+            let [closure, tbl] = unpack::<2>(func.args);
 
-            let by = resolver
-                .coerce_into_tuple(by)?
-                .kind
-                .into_tuple()
-                .unwrap()
-                .into_iter()
-                .map(|node| {
-                    let (column, direction) = match node.kind {
-                        ExprKind::RqOperator { name, mut args } if name == "std.neg" => {
-                            (args.remove(0), SortDirection::Desc)
-                        }
-                        _ => (node, SortDirection::default()),
-                    };
-                    let column = Box::new(column);
+            let (_, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
 
-                    ColumnSort { direction, column }
-                })
-                .collect();
-
-            (TransformKind::Sort { by }, tbl)
+            (vec![closure, tbl], tbl.ty.clone())
         }
-        "take" => {
-            let [expr, tbl] = unpack::<2>(closure);
+        "std.take" => {
+            let [expr, tbl] = unpack::<2>(func.args);
 
-            let range = if let ExprKind::Literal(Literal::Integer(n)) = expr.kind {
-                range_from_ints(None, Some(n))
-            } else {
-                match try_restrict_range(expr) {
-                    Ok(range) => range,
-                    Err(expr) => {
-                        return Err(Error::new(Reason::Expected {
-                            who: Some("`take`".to_string()),
-                            expected: "int or range".to_string(),
-                            found: write_pl(expr.clone()),
-                        })
-                        // Possibly this should refer to the item after the `take` where
-                        // one exists?
-                        .with_span(expr.span)
-                        .into());
-                    }
-                }
-            };
-
-            (TransformKind::Take { range }, tbl)
+            (vec![expr, tbl], tbl.ty.clone())
         }
-        "join" => {
-            let [side, with, filter, tbl] = unpack::<4>(closure);
+        "std.join" => {
+            let [side, right, condition, left] = unpack::<4>(func.args);
+
+            let left_ty = left.ty.clone().unwrap();
+            let right_ty = right.ty.clone().unwrap();
+
+            let mut joined = join_relations(left_ty, right_ty);
+
+            let condition_func = condition.kind.as_func().unwrap();
+            let out_ty = resolver.simulate_func_application(&condition_func, &mut joined)?;
+
+            let result_ty = Ty::new(TyKind::Array(Box::new(out_ty)));
 
             let side = {
                 let span = side.span;
                 let ident = side.try_cast(ExprKind::into_ident, Some("side"), "ident")?;
-                match ident.to_string().as_str() {
-                    "inner" => JoinSide::Inner,
-                    "left" => JoinSide::Left,
-                    "right" => JoinSide::Right,
-                    "full" => JoinSide::Full,
-
-                    found => bail!(Error::new(Reason::Expected {
-                        who: Some("`side`".to_string()),
-                        expected: "inner, left, right or full".to_string(),
-                        found: found.to_string()
-                    })
-                    .with_span(span)),
+                Expr {
+                    span,
+                    ..Expr::new(Literal::String(ident.to_string()))
                 }
             };
 
-            let filter = Box::new(filter);
-            let with = Box::new(with);
-            (TransformKind::Join { side, with, filter }, tbl)
+            (vec![side, right, condition, left], Some(result_ty))
         }
         "group" => {
-            let [by, pipeline, tbl] = unpack::<3>(closure);
+            let [by, pipeline, tbl] = unpack::<3>(func.args);
 
-            let by = resolver.coerce_into_tuple(by)?;
+            // by
+            resolver.simulate_array_map(&by, &mut tbl)?;
 
-            let pipeline = fold_by_simulating_eval(resolver, pipeline, tbl.ty.clone().unwrap())?;
+            // pipeline
+            let pipeline_func = pipeline.kind.as_func().unwrap();
+            let tbl_ty = tbl.ty.as_mut().unwrap();
+            let out_ty = resolver.simulate_func_application(&pipeline_func, tbl_ty)?;
 
-            let pipeline = Box::new(pipeline);
-            (TransformKind::Group { by, pipeline }, tbl)
+            (vec![by, pipeline, tbl], Some(out_ty))
         }
         "window" => {
-            let [rows, range, expanding, rolling, pipeline, tbl] = unpack::<6>(closure);
+            let [rows, range, expanding, rolling, pipeline, tbl] = unpack::<6>(func.args);
 
             let expanding = {
                 let as_bool = expanding.kind.as_literal().and_then(|l| l.as_boolean());
@@ -198,12 +177,12 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
             (transform_kind, tbl)
         }
         "append" => {
-            let [bottom, top] = unpack::<2>(closure);
+            let [bottom, top] = unpack::<2>(func.args);
 
             (TransformKind::Append(Box::new(bottom)), top)
         }
         "loop" => {
-            let [pipeline, tbl] = unpack::<2>(closure);
+            let [pipeline, tbl] = unpack::<2>(func.args);
 
             let pipeline = fold_by_simulating_eval(resolver, pipeline, tbl.ty.clone().unwrap())?;
 
@@ -213,7 +192,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         "in" => {
             // yes, this is not a transform, but this is the most appropriate place for it
 
-            let [pattern, value] = unpack::<2>(closure);
+            let [pattern, value] = unpack::<2>(func.args);
 
             let pattern = match try_restrict_range(pattern) {
                 Ok(Range { start, end }) => {
@@ -240,7 +219,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         "tuple_every" => {
             // yes, this is not a transform, but this is the most appropriate place for it
 
-            let [list] = unpack::<1>(closure);
+            let [list] = unpack::<1>(func.args);
             let list = list.kind.into_tuple().unwrap();
 
             let mut res = None;
@@ -255,7 +234,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         "tuple_map" => {
             // yes, this is not a transform, but this is the most appropriate place for it
 
-            let [func, list] = unpack::<2>(closure);
+            let [func, list] = unpack::<2>(func.args);
             let list_items = list.kind.into_tuple().unwrap();
 
             let list_items = list_items
@@ -277,7 +256,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         "tuple_zip" => {
             // yes, this is not a transform, but this is the most appropriate place for it
 
-            let [a, b] = unpack::<2>(closure);
+            let [a, b] = unpack::<2>(func.args);
             let a = a.kind.into_tuple().unwrap();
             let b = b.kind.into_tuple().unwrap();
 
@@ -292,7 +271,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         "_eq" => {
             // yes, this is not a transform, but this is the most appropriate place for it
 
-            let [list] = unpack::<1>(closure);
+            let [list] = unpack::<1>(func.args);
             let list = list.kind.into_tuple().unwrap();
             let [a, b]: [Expr; 2] = list.try_into().unwrap();
 
@@ -301,7 +280,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         }
 
         "tuple_exclude" => {
-            let [expr, exclude] = unpack(closure);
+            let [expr, exclude] = unpack(func.args);
 
             return create_tuple_exclude(expr, exclude, None);
         }
@@ -309,7 +288,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         "from_text" => {
             // yes, this is not a transform, but this is the most appropriate place for it
 
-            let [format, text_expr] = unpack::<2>(closure);
+            let [format, text_expr] = unpack::<2>(func.args);
 
             let text = match text_expr.kind {
                 ExprKind::Literal(Literal::String(text)) => text,
@@ -380,7 +359,7 @@ pub fn cast_transform(resolver: &mut Resolver, closure: Func) -> Result<Expr> {
         _ => {
             return Err(Error::new_simple("unknown operator {internal_name}")
                 .push_hint("this is a bug in prqlc")
-                .with_span(closure.body.span)
+                .with_span(func.body.span)
                 .into())
         }
     };
@@ -615,8 +594,8 @@ fn join_relations(mut lhs: Ty, rhs: Ty) -> Ty {
 
 // Expects closure's args to be resolved.
 // Note that named args are before positional args, in order of declaration.
-fn unpack<const P: usize>(closure: Func) -> [Expr; P] {
-    closure.args.try_into().expect("bad transform cast")
+fn unpack<const P: usize>(func_args: Vec<Expr>) -> [Expr; P] {
+    func_args.try_into().expect("bad special function cast")
 }
 
 mod from_text {

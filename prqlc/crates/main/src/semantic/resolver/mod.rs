@@ -8,6 +8,7 @@ mod transforms;
 mod types;
 
 use crate::ir::decl::RootModule;
+use crate::ir::pl::Expr;
 use crate::semantic::{NS_PARAM, NS_STD};
 use crate::utils::IdGenerator;
 
@@ -43,6 +44,10 @@ impl Resolver {
             id: IdGenerator::new(),
         }
     }
+}
+
+fn is_resolved(expr: &Expr) -> bool {
+    expr.id.is_some()
 }
 
 #[cfg(test)]

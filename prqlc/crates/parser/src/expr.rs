@@ -324,8 +324,7 @@ where
         .boxed();
 
     let internal = keyword("internal")
-        .ignore_then(ident())
-        .map(|x| x.to_string())
+        .ignore_then(ident().map(|x| x.to_string()))
         .map(ExprKind::Internal)
         .map_with_span(into_expr);
 

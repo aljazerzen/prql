@@ -75,7 +75,7 @@ impl Resolver {
                     })
                 }
             } else {
-                let expr = transforms::cast_transform(self, closure)?;
+                let expr = transforms::resolve_special_func(self, closure)?;
                 self.fold_expr(expr)?
             }
         } else {
@@ -121,7 +121,7 @@ impl Resolver {
     }
 
     fn resolve_function_body(&mut self, mut func: Func) -> Result<Func> {
-        if matches!(func.body.kind, ExprKind::Internal(_)) {
+        if super::is_resolved(&func.body) || matches!(func.body.kind, ExprKind::Internal(_)) {
             return Ok(func);
         }
 
@@ -334,6 +334,44 @@ impl Resolver {
         } else {
             self.fold_expr(expr)
         }
+    }
+
+    /// Simulates application of a function to a value.
+    pub fn simulate_func_application(
+        &mut self,
+        func: &Func,
+        val_ty: &mut Ty,
+    ) -> Result<Ty> {
+        log::debug!("simulate_func_application {:?}", func.name_hint);
+
+        let next_param_applied = func.args.len();
+        if let Some(param) = func.params.get(next_param_applied) {
+            if let Some(param_ty) = &param.ty {
+                let param_ty = param_ty.as_ty().unwrap();
+                super::types::restrict_type(val_ty, param_ty.clone());
+            }
+        }
+
+        let body_ty = func.return_ty.as_ref().unwrap().as_ty().unwrap().clone();
+
+        dbg!(val_ty);
+        Ok(dbg!(body_ty))
+    }
+
+    /// Simulates application of a function to each item of an array.
+    pub fn simulate_array_map(
+        &mut self,
+        func: &Expr,
+        arr: &mut Expr
+    ) -> Result<(&Ty, Ty)> {
+        let closure = func.kind.as_func().unwrap();
+        let tbl_ty = arr.ty.as_mut().unwrap();
+
+        let row_ty = tbl_ty.kind.as_array_mut().unwrap();
+
+        let result_row_ty = self.simulate_func_application(closure, row_ty)?;
+
+        Ok((row_ty, result_row_ty))
     }
 }
 
