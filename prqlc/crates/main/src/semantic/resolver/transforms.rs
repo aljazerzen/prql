@@ -4,24 +4,21 @@ use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use serde::Deserialize;
 
-use crate::ir::decl::{Decl, DeclKind, Module};
-use crate::ir::generic::WindowKind;
 use crate::ir::pl::*;
-use crate::semantic::ast_expand::try_restrict_range;
+use crate::semantic::ast_expand::{restrict_null_literal, try_restrict_range};
 use crate::semantic::resolver::types::type_intersection;
 use crate::semantic::write_pl;
 use crate::{Error, Reason, WithErrorInfo};
 
 use super::expr::create_tuple_exclude;
 use super::Resolver;
-use super::NS_PARAM;
 
 /// try to convert function call with enough args into transform
 pub fn resolve_special_func(resolver: &mut Resolver, func: Func) -> Result<Expr> {
     let internal_name = func.body.kind.into_internal().unwrap();
 
-    let (kind, input) = match internal_name.as_str() {
-        "std.select" => {
+    let (args, ty) = match internal_name.as_str() {
+        "select" => {
             let [closure, mut tbl] = unpack::<2>(func.args);
 
             let (_, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
@@ -30,47 +27,54 @@ pub fn resolve_special_func(resolver: &mut Resolver, func: Func) -> Result<Expr>
 
             (vec![closure, tbl], Some(result_ty))
         }
-        "std.filter" => {
+        "filter" => {
             let [closure_expr, mut tbl] = unpack::<2>(func.args);
 
             resolver.simulate_array_map(&closure_expr, &mut tbl)?;
 
-            (vec![closure_expr, tbl], tbl.ty)
+            let result_ty = tbl.ty.clone();
+            (vec![closure_expr, tbl], result_ty)
         }
-        "std.derive" => {
+        "derive" => {
             let [closure, mut tbl] = unpack::<2>(func.args);
 
             let (in_ty, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
 
-            let in_tuple = in_ty.kind.as_tuple().unwrap();
+            let in_tuple = in_ty.kind.as_tuple().unwrap().clone();
             let out_tuple = out_ty.kind.as_tuple().unwrap();
 
-            let result_tuple = resolver.concat_tuples(in_tuple, out_tuple)?;
+            let result_tuple = resolver.concat_tuples(&in_tuple, out_tuple)?;
 
             let result_ty = Ty::new(TyKind::Array(Box::new(result_tuple)));
             (vec![closure, tbl], Some(result_ty))
         }
-        "std.aggregate" => {
-            let [closure, mut tbl] = unpack::<2>(func.args);
+        "aggregate" => {
+            let [closure, tbl] = unpack::<2>(func.args);
 
-            let (_, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
+            let tbl_ty = tbl.ty.clone().unwrap();
+            let mut columnar_ty = super::types::relation_into_columnar(tbl_ty);
+
+            let func = closure.kind.as_func().unwrap();
+            let out_ty = resolver.simulate_func_application(&func, &mut columnar_ty)?;
 
             let result_ty = Ty::new(TyKind::Array(Box::new(out_ty)));
             (vec![closure, tbl], Some(result_ty))
         }
-        "std.sort" => {
-            let [closure, tbl] = unpack::<2>(func.args);
+        "sort" => {
+            let [closure, mut tbl] = unpack::<2>(func.args);
 
-            let (_, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
+            resolver.simulate_array_map(&closure, &mut tbl)?;
 
-            (vec![closure, tbl], tbl.ty.clone())
+            let result_ty = tbl.ty.clone();
+            (vec![closure, tbl], result_ty)
         }
-        "std.take" => {
+        "take" => {
             let [expr, tbl] = unpack::<2>(func.args);
 
-            (vec![expr, tbl], tbl.ty.clone())
+            let result_ty = tbl.ty.clone();
+            (vec![expr, tbl], result_ty)
         }
-        "std.join" => {
+        "join" => {
             let [side, right, condition, left] = unpack::<4>(func.args);
 
             let left_ty = left.ty.clone().unwrap();
@@ -95,7 +99,7 @@ pub fn resolve_special_func(resolver: &mut Resolver, func: Func) -> Result<Expr>
             (vec![side, right, condition, left], Some(result_ty))
         }
         "group" => {
-            let [by, pipeline, tbl] = unpack::<3>(func.args);
+            let [by, pipeline, mut tbl] = unpack::<3>(func.args);
 
             // by
             resolver.simulate_array_map(&by, &mut tbl)?;
@@ -108,7 +112,11 @@ pub fn resolve_special_func(resolver: &mut Resolver, func: Func) -> Result<Expr>
             (vec![by, pipeline, tbl], Some(out_ty))
         }
         "window" => {
-            let [rows, range, expanding, rolling, pipeline, tbl] = unpack::<6>(func.args);
+            let [rows, range, expanding, rolling, closure, mut tbl] = unpack::<6>(func.args);
+
+            let (_, out_ty) = resolver.simulate_array_map(&closure, &mut tbl)?;
+
+            let result_ty = Ty::new(TyKind::Array(Box::new(out_ty)));
 
             let expanding = {
                 let as_bool = expanding.kind.as_literal().and_then(|l| l.as_boolean());
@@ -136,57 +144,45 @@ pub fn resolve_special_func(resolver: &mut Resolver, func: Func) -> Result<Expr>
                 })?
             };
 
-            let rows = try_restrict_range(rows).map_err(|e| {
-                Error::new(Reason::Expected {
-                    who: Some("parameter `rows`".to_string()),
-                    expected: "a range".to_string(),
-                    found: write_pl(e),
-                })
-            })?;
+            let rows = into_literal_range(try_restrict_range(rows).unwrap())?;
 
-            let range = try_restrict_range(range).map_err(|e| {
-                Error::new(Reason::Expected {
-                    who: Some("parameter `range`".to_string()),
-                    expected: "a range".to_string(),
-                    found: write_pl(e),
-                })
-            })?;
+            let range = into_literal_range(try_restrict_range(range).unwrap())?;
 
-            let (kind, range) = if expanding {
-                (WindowKind::Rows, range_from_ints(None, Some(0)))
+            let (kind, start, end) = if expanding {
+                ("rows", None, Some(0))
             } else if rolling > 0 {
-                (
-                    WindowKind::Rows,
-                    range_from_ints(Some(-rolling + 1), Some(0)),
-                )
+                ("rows", Some(-rolling + 1), Some(0))
             } else if !range_is_empty(&rows) {
-                (WindowKind::Rows, rows)
+                ("rows", rows.0, rows.1)
             } else if !range_is_empty(&range) {
-                (WindowKind::Range, range)
+                ("range", range.0, range.1)
             } else {
-                (WindowKind::Rows, Range::unbounded())
+                ("rows", None, None)
             };
+            let kind = Expr::new(Literal::String(kind.to_string()));
+            let start = Expr::new(start.map_or(Literal::Null, Literal::Integer));
+            let end = Expr::new(end.map_or(Literal::Null, Literal::Integer));
 
-            let pipeline = fold_by_simulating_eval(resolver, pipeline, tbl.ty.clone().unwrap())?;
-
-            let transform_kind = TransformKind::Window {
-                kind,
-                range,
-                pipeline: Box::new(pipeline),
-            };
-            (transform_kind, tbl)
+            (vec![kind, start, end, closure, tbl], Some(result_ty))
         }
         "append" => {
             let [bottom, top] = unpack::<2>(func.args);
 
-            (TransformKind::Append(Box::new(bottom)), top)
+            let top_ty = top.ty.clone().unwrap();
+            let bottom_ty = bottom.ty.clone().unwrap();
+
+            let result_ty = type_intersection(top_ty, bottom_ty);
+
+            (vec![bottom, top], Some(result_ty))
         }
         "loop" => {
-            let [pipeline, tbl] = unpack::<2>(func.args);
+            let [pipeline, mut tbl] = unpack::<2>(func.args);
 
-            let pipeline = fold_by_simulating_eval(resolver, pipeline, tbl.ty.clone().unwrap())?;
+            let pipeline_func = pipeline.kind.as_func().unwrap();
+            let tbl_ty = tbl.ty.as_mut().unwrap();
+            let res_ty = resolver.simulate_func_application(&pipeline_func, tbl_ty)?;
 
-            (TransformKind::Loop(Box::new(pipeline)), tbl)
+            (vec![pipeline, tbl], Some(res_ty))
         }
 
         "in" => {
@@ -195,9 +191,12 @@ pub fn resolve_special_func(resolver: &mut Resolver, func: Func) -> Result<Expr>
             let [pattern, value] = unpack::<2>(func.args);
 
             let pattern = match try_restrict_range(pattern) {
-                Ok(Range { start, end }) => {
-                    let start = start.map(|s| new_binop(value.clone(), &["std", "gte"], *s));
-                    let end = end.map(|end| new_binop(value, &["std", "lte"], *end));
+                Ok((start, end)) => {
+                    let start = restrict_null_literal(start);
+                    let end = restrict_null_literal(end);
+
+                    let start = start.map(|s| new_binop(value.clone(), &["std", "gte"], s));
+                    let end = end.map(|e| new_binop(value, &["std", "lte"], e));
 
                     let res = maybe_binop(start, &["std", "and"], end);
                     let res =
@@ -357,25 +356,27 @@ pub fn resolve_special_func(resolver: &mut Resolver, func: Func) -> Result<Expr>
         }
 
         _ => {
-            return Err(Error::new_simple("unknown operator {internal_name}")
-                .push_hint("this is a bug in prqlc")
-                .with_span(func.body.span)
-                .into())
+            return Err(
+                Error::new_simple(format!("unknown operator {internal_name}"))
+                    .push_hint("this is a bug in prqlc")
+                    .with_span(func.body.span)
+                    .into(),
+            )
         }
     };
 
-    let transform_call = TransformCall {
-        kind: Box::new(kind),
-        input: Box::new(input),
-        partition: Vec::new(),
-        frame: WindowFrame::default(),
-        sort: Vec::new(),
-    };
-    Ok(Expr::new(ExprKind::TransformCall(transform_call)))
+    Ok(Expr {
+        ty,
+        ..Expr::new(ExprKind::RqOperator {
+            name: internal_name,
+            args,
+        })
+    })
 }
 
 impl Resolver {
     /// Wraps non-tuple Exprs into a singleton Tuple.
+    #[allow(dead_code)]
     fn coerce_into_tuple(&mut self, expr: Expr) -> Result<Expr> {
         let is_tuple = expr.ty.as_ref().unwrap().is_tuple()
             && !(expr.kind.is_tuple_exclude() || expr.kind.is_tuple_fields());
@@ -398,89 +399,24 @@ impl Resolver {
     }
 }
 
-fn range_is_empty(range: &Range) -> bool {
-    fn as_int(bound: &Option<Box<Expr>>) -> Option<i64> {
-        bound
-            .as_ref()
-            .and_then(|s| s.kind.as_literal())
-            .and_then(|l| l.as_integer().cloned())
-    }
-
-    if let Some((s, e)) = as_int(&range.start).zip(as_int(&range.end)) {
-        s >= e
-    } else {
-        false
+fn range_is_empty(range: &(Option<i64>, Option<i64>)) -> bool {
+    match (&range.0, &range.1) {
+        (Some(s), Some(e)) => s >= e,
+        _ => false,
     }
 }
 
-fn range_from_ints(start: Option<i64>, end: Option<i64>) -> Range {
-    let start = start.map(|x| Box::new(Expr::new(ExprKind::Literal(Literal::Integer(x)))));
-    let end = end.map(|x| Box::new(Expr::new(ExprKind::Literal(Literal::Integer(x)))));
-    Range { start, end }
-}
-
-/// Simulate evaluation of the inner pipeline of group or window
-// Creates a dummy node that acts as value that pipeline can be resolved upon.
-fn fold_by_simulating_eval(
-    resolver: &mut Resolver,
-    pipeline: Expr,
-    val_ty: Ty,
-) -> Result<Expr, anyhow::Error> {
-    log::debug!("fold by simulating evaluation");
-
-    let param_name = "_tbl";
-    let param_id = resolver.id.gen();
-    let param_ty = Ty {
-        lineage: Some(param_id),
-        ..Ty::new(TyKind::Union(vec![]))
-    };
-
-    // resolver will not resolve a function call if any arguments are missing
-    // but would instead return a closure to be resolved later.
-    // because the pipeline of group is a function that takes a table chunk
-    // and applies the transforms to it, it would not get resolved.
-    // thats why we trick the resolver with a dummy node that acts as table
-    // chunk and instruct resolver to apply the transform on that.
-
-    let mut dummy = Expr::new(ExprKind::Ident(Ident::from_name(param_name)));
-    dummy.ty = Some(val_ty);
-
-    let pipeline = Expr::new(ExprKind::FuncCall(FuncCall::new_simple(
-        pipeline,
-        vec![dummy],
-    )));
-
-    let env = Module::singleton(param_name, Decl::from(DeclKind::Column(param_ty)));
-    resolver.root_mod.module.stack_push(NS_PARAM, env);
-
-    let pipeline = resolver.fold_expr(pipeline)?;
-
-    resolver.root_mod.module.stack_pop(NS_PARAM).unwrap();
-
-    // now, we need wrap the result into a closure and replace
-    // the dummy node with closure's parameter.
-
-    // extract reference to the dummy node
-    // let mut tbl_node = extract_ref_to_first(&mut pipeline);
-    // *tbl_node = Expr::new(ExprKind::Ident("x".to_string()));
-
-    let pipeline = Expr::new(ExprKind::Func(Box::new(Func {
-        name_hint: None,
-        body: Box::new(pipeline),
-        return_ty: None,
-
-        args: vec![],
-        params: vec![FuncParam {
-            name: param_id.to_string(),
-            ty: None,
-            default_value: None,
-            implicit_closure: None,
-        }],
-        named_params: vec![],
-
-        env: Default::default(),
-    })));
-    Ok(pipeline)
+fn into_literal_range(range: (Expr, Expr)) -> Result<(Option<i64>, Option<i64>)> {
+    fn into_int(bound: Expr) -> Result<Option<i64>> {
+        match bound.kind {
+            ExprKind::Literal(Literal::Null) => Ok(None),
+            ExprKind::Literal(Literal::Integer(i)) => Ok(Some(i)),
+            _ => Err(Error::new_simple(format!("expected an int literal"))
+                .with_span(bound.span)
+                .into()),
+        }
+    }
+    Ok((into_int(range.0)?, into_int(range.1)?))
 }
 
 impl Resolver {

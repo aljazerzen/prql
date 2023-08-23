@@ -37,7 +37,7 @@ fn coerce_kind_to_set(resolver: &mut Resolver, expr: ExprKind) -> Result<Ty> {
             for e in elements {
                 match try_restrict_range(e) {
                     // special case: {x..}
-                    Ok(Range { .. }) => {
+                    Ok(_) => {
                         has_other = true;
                     }
 
@@ -712,6 +712,19 @@ fn type_intersection_of_tuples(a: TyTuple, b: TyTuple) -> Ty {
     }
 
     Ty::new(TyKind::Tuple(TyTuple { fields, has_other }))
+}
+
+/// Converts an array of tuples into a tuple of array
+pub fn relation_into_columnar(ty: Ty) -> Ty {
+    let mut array_item = *ty.kind.into_array().unwrap();
+
+    let tuple = array_item.kind.as_tuple_mut().unwrap();
+    for (_, field_ty) in &mut tuple.fields {
+        let ty = field_ty.take().unwrap_or_else(|| Ty::new(TyKind::Any));
+        *field_ty = Some(Ty::new(TyKind::Array(Box::new(ty))))
+    }
+
+    array_item
 }
 
 #[cfg(test)]

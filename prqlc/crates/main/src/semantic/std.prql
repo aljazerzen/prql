@@ -53,6 +53,8 @@ type array = [any]
 
 ## Scalar
 type scalar = int || float || bool || text || date || time || timestamp || null
+
+## Tuple of possibly many types
 type tuple = {any..}
 
 ## Range
@@ -60,6 +62,9 @@ type range = {start = scalar, end = scalar}
 
 ## Relation (an array of tuples)
 type relation = [tuple]
+
+## Columnar relation (a tuple of arrays)
+type tuple_of_arrays = {array..}
 
 ## Transform
 type transform = (func relation -> relation)
@@ -75,36 +80,36 @@ let from = func
 let select = func
   columns <tuple>
   tbl <relation>
-  -> <relation> internal std.select
+  -> <relation> internal select
 
 @(implicit_closure on:0 param_names:[this])
 let filter = func
   condition <bool>
   tbl <relation>
-  -> <relation> internal std.filter
+  -> <relation> internal filter
 
 @(implicit_closure on:0 param_names:[this])
 let derive = func
   columns <tuple>
   tbl <relation>
-  -> <relation> internal std.derive
+  -> <relation> internal derive
 
 @(implicit_closure on:0 param_names:[this])
 let aggregate = func
   columns <tuple>
   tbl <relation>
-  -> <relation> internal std.aggregate
+  -> <relation> internal aggregate
 
 @(implicit_closure on:0 param_names:[this])
 let sort = func
   by <tuple>
   tbl <relation>
-  -> <relation> internal std.sort
+  -> <relation> internal sort
 
 let take = func
   expr <scalar>
   tbl <relation>
-  -> <relation> internal std.take
+  -> <relation> internal take
 
 @(implicit_closure on:1 param_names:[this, that])
 let join = func
@@ -112,14 +117,14 @@ let join = func
   condition <bool>
   `noresolve.side`:inner
   left <relation>
-  -> <relation> internal std.join
+  -> <relation> internal join
 
 @(implicit_closure on:0 param_names:[this])
 let group = func
   by<scalar || tuple>
   pipeline <transform>
   tbl <relation>
-  -> <relation> internal std.group
+  -> <relation> internal group
 
 @(implicit_closure on:0 param_names:[this])
 let window = func
@@ -127,11 +132,11 @@ let window = func
   range:0..0
   expanding <bool>:false
   rolling <int>:0
-  columns <transform>
+  expr <tuple>
   tbl <relation>
-  -> <relation> internal std.window
+  -> <relation> internal window
 
-let append = bottom<relation> top<relation> -> <relation> internal std.append
+let append = bottom<relation> top<relation> -> <relation> internal append
 # let intersect = bottom<relation> top<relation> -> <relation> (
 #   top
 #   join bottom (tuple_every (tuple_map _eq (tuple_zip this that)))
@@ -146,7 +151,7 @@ let append = bottom<relation> top<relation> -> <relation> internal std.append
 let loop = func
   pipeline <transform>
   top <relation>
-  -> <relation> internal std.loop
+  -> <relation> internal loop
 
 ## Aggregate functions
 # These return either a scalar when used within `aggregate`, or a column when used anywhere else.

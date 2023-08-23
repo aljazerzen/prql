@@ -337,11 +337,7 @@ impl Resolver {
     }
 
     /// Simulates application of a function to a value.
-    pub fn simulate_func_application(
-        &mut self,
-        func: &Func,
-        val_ty: &mut Ty,
-    ) -> Result<Ty> {
+    pub fn simulate_func_application(&mut self, func: &Func, val_ty: &mut Ty) -> Result<Ty> {
         log::debug!("simulate_func_application {:?}", func.name_hint);
 
         let next_param_applied = func.args.len();
@@ -359,10 +355,10 @@ impl Resolver {
     }
 
     /// Simulates application of a function to each item of an array.
-    pub fn simulate_array_map(
-        &mut self,
+    pub fn simulate_array_map<'a>(
+        &'a mut self,
         func: &Expr,
-        arr: &mut Expr
+        arr: &'a mut Expr,
     ) -> Result<(&Ty, Ty)> {
         let closure = func.kind.as_func().unwrap();
         let tbl_ty = arr.ty.as_mut().unwrap();
